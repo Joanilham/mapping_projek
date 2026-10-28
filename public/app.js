@@ -2204,36 +2204,137 @@ async function handleSyncVaultClick() {
 function openModal(id) { document.getElementById(id).classList.add("active"); }
 function closeModal(id) { document.getElementById(id).classList.remove("active"); }
 
+let currentBrowsePath = "";
+let currentParentPath = "";
+let driveProjectsCache = [];
+
+async function pickFolderWithFileManager() {
+  const btn = document.getElementById("btnPickFolderFileManager");
+  const titleEl = document.getElementById("btnPickFolderTitle");
+  const descEl = document.getElementById("btnPickFolderDesc");
+  if (btn) btn.classList.add("loading");
+  if (titleEl) titleEl.textContent = "Sedang membuka File Manager OS...";
+  if (descEl) descEl.textContent = "Silakan klik/pilih folder proyek di jendela File Manager Linux...";
+
+  try {
+    const res = await fetch(`${BRIDGE_URL}/api/pick_folder?initialDir=${encodeURIComponent(currentBrowsePath || '')}`);
+    const data = await res.json();
+    if (data.success && data.path) {
+      applyChosenFolder(data.path, data.name);
+      showToast(`📁 Folder dipilih: ${data.name || data.path}`, true);
+    } else if (data.cancelled) {
+      showToast("Pemilihan folder dibatalkan");
+    } else {
+      // Fallback: picu dialog browser folder picker jika Zenity tidak tersedia
+      showToast("Membuka browser directory picker...");
+      const fileInput = document.getElementById("html5DirectoryPicker");
+      if (fileInput) fileInput.click();
+    }
+  } catch (err) {
+    // Fallback: picu dialog browser folder picker
+    const fileInput = document.getElementById("html5DirectoryPicker");
+    if (fileInput) fileInput.click();
+  } finally {
+    if (btn) btn.classList.remove("loading");
+    if (titleEl) titleEl.textContent = "Buka File Manager (Pilih Folder)";
+    if (descEl) descEl.textContent = "Pilih folder proyek secara visual lewat jendela File Manager Linux";
+  }
+}
+
+function handleHtml5FolderSelect(event) {
+  const files = event.target.files;
+  if (!files || files.length === 0) return;
+  const firstPath = files[0].webkitRelativePath || files[0].name || "";
+  const rootFolderName = firstPath.split('/')[0];
+  if (rootFolderName) {
+    const matched = driveProjectsCache.find(d => d.name === rootFolderName);
+    if (matched) {
+      applyChosenFolder(matched.path, matched.name);
+    } else {
+      applyChosenFolder(rootFolderName, rootFolderName);
+    }
+    showToast(`📁 Folder dipilih: ${rootFolderName}`, true);
+  }
+}
+
+async function loadDirectoryBrowser(dirPath = "") {
+  const listEl = document.getElementById("driveProjectsList");
+  const folderNameEl = document.getElementById("browseCurrentFolder");
+  const upBtn = document.getElementById("btnBrowseUp");
+  if (!listEl) return;
+
+  listEl.innerHTML = '<div style="font-size:11px; color:var(--text-muted); font-family:\'JetBrains Mono\',monospace; padding:4px;">Memuat folder proyek...</div>';
+
+  try {
+    const res = await fetch(`${BRIDGE_URL}/api/browse_directories?dir=${encodeURIComponent(dirPath)}`);
+    const data = await res.json();
+    if (data.directories && Array.isArray(data.directories)) {
+      driveProjectsCache = data.directories;
+      currentBrowsePath = data.currentDir;
+      currentParentPath = data.parentDir;
+
+      if (folderNameEl) {
+        folderNameEl.textContent = data.currentDir.split('/').filter(Boolean).pop() || data.currentDir;
+        folderNameEl.title = data.currentDir;
+      }
+
+      if (upBtn) {
+        upBtn.style.display = (data.parentDir && data.parentDir !== data.currentDir) ? "inline-block" : "none";
+      }
+
+      if (data.directories.length === 0) {
+        listEl.innerHTML = '<div style="font-size:11px; color:var(--text-muted); font-family:\'JetBrains Mono\',monospace; padding:4px;">Tidak ada subfolder di direktori ini</div>';
+        return;
+      }
+
+      listEl.innerHTML = data.directories.map(d => `
+        <button type="button" class="drive-folder-pill" onclick="selectDriveProject('${escapeHtml(d.path)}', '${escapeHtml(d.name)}')">
+          📁 ${escapeHtml(d.name)}
+        </button>
+      `).join("");
+    } else {
+      listEl.innerHTML = '<div style="font-size:11px; color:var(--c-danger); padding:4px;">Gagal memuat folder</div>';
+    }
+  } catch (err) {
+    listEl.innerHTML = `<div style="font-size:11px; color:var(--c-danger); padding:4px;">Error: ${err.message}</div>`;
+  }
+}
+
+function browseUpDirectory() {
+  if (currentParentPath) {
+    loadDirectoryBrowser(currentParentPath);
+  }
+}
+
+function selectDriveProject(folderPath, folderName) {
+  applyChosenFolder(folderPath, folderName);
+  const pills = document.querySelectorAll(".drive-folder-pill");
+  pills.forEach(p => {
+    if (p.textContent.includes(folderName)) p.classList.add("active");
+    else p.classList.remove("active");
+  });
+}
+
+function applyChosenFolder(folderPath, folderName) {
+  const input = document.getElementById("scanPathInput");
+  if (input) input.value = folderPath;
+
+  const badge = document.getElementById("chosenFolderNameBadge");
+  if (badge) {
+    badge.textContent = `Projek: ${folderName || folderPath.split('/').pop()}`;
+    badge.style.display = "inline-block";
+  }
+}
+
 function openScanModal() {
   const input = document.getElementById("scanPathInput");
   if (input) input.value = "";
 
-  const container = document.getElementById("scanQuickSuggestions");
-  if (container) {
-    let recent = [];
-    try {
-      recent = JSON.parse(localStorage.getItem("recent_scanned_projects") || "[]");
-    } catch {}
-
-    if (recent.length === 0) {
-      recent = [
-        "/run/media/joan/7838E7CB38E7868A/Projek/Mapping Projek",
-        "/home/joan/mcp-memory-server"
-      ];
-    }
-
-    container.innerHTML = recent.map(p => `
-      <span class="file-pill" onclick="document.getElementById('scanPathInput').value='${p}'" style="cursor:pointer; font-size:10px;">
-        📁 ${p.split('/').pop() || p}
-      </span>
-    `).join("");
-  }
+  const badge = document.getElementById("chosenFolderNameBadge");
+  if (badge) badge.style.display = "none";
 
   openModal("scanModal");
-  setTimeout(() => {
-    const el = document.getElementById("scanPathInput");
-    if (el) el.focus();
-  }, 100);
+  loadDirectoryBrowser();
 }
 
 async function executeGuiProjectScan() {

@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as url from 'node:url';
 import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
 import { SessionManager } from '../engine/session_manager.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -132,6 +133,82 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
                 res.end(JSON.stringify({ error: err.message }));
               }
             });
+            return;
+          }
+
+          if (pathname === '/api/pick_folder') {
+            const initialDir = (parsedUrl.query.initialDir as string) || path.dirname(manager.workspacePath) || manager.workspacePath;
+            const formattedDir = initialDir.endsWith(path.sep) ? initialDir : initialDir + path.sep;
+
+            const zenityArgs = [
+              '--file-selection',
+              '--directory',
+              '--title=Pilih Direktori Proyek untuk Dipindai',
+              `--filename=${formattedDir}`
+            ];
+
+            const runEnv = {
+              ...process.env,
+              DISPLAY: process.env.DISPLAY || ':0',
+              WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY
+            };
+
+            execFile('zenity', zenityArgs, { env: runEnv }, (error, stdout) => {
+              if (error) {
+                // Exit code 1 typically indicates user pressed Cancel
+                if ((error as any).code === 1) {
+                  res.writeHead(200);
+                  res.end(JSON.stringify({ success: false, cancelled: true }));
+                  return;
+                }
+                res.writeHead(200);
+                res.end(JSON.stringify({ success: false, error: error.message }));
+                return;
+              }
+
+              const chosen = (stdout || '').trim();
+              if (chosen && fs.existsSync(chosen) && fs.statSync(chosen).isDirectory()) {
+                res.writeHead(200);
+                res.end(JSON.stringify({
+                  success: true,
+                  path: chosen,
+                  name: path.basename(chosen)
+                }));
+              } else {
+                res.writeHead(200);
+                res.end(JSON.stringify({ success: false, error: 'Path yang dipilih tidak valid atau bukan direktori' }));
+              }
+            });
+            return;
+          }
+
+          if (pathname === '/api/browse_directories' && req.method === 'GET') {
+            try {
+              let targetDir = (parsedUrl.query.dir as string) || path.dirname(manager.workspacePath) || manager.workspacePath;
+              targetDir = path.resolve(targetDir);
+              if (!fs.existsSync(targetDir) || !fs.statSync(targetDir).isDirectory()) {
+                targetDir = manager.workspacePath;
+              }
+
+              const entries = fs.readdirSync(targetDir, { withFileTypes: true });
+              const subdirs = entries
+                .filter(e => e.isDirectory() && !e.name.startsWith('.'))
+                .map(e => ({
+                  name: e.name,
+                  path: path.join(targetDir, e.name)
+                }))
+                .sort((a, b) => a.name.localeCompare(b.name));
+
+              res.writeHead(200);
+              res.end(JSON.stringify({
+                currentDir: targetDir,
+                parentDir: path.dirname(targetDir),
+                directories: subdirs
+              }));
+            } catch (err: any) {
+              res.writeHead(500);
+              res.end(JSON.stringify({ error: err.message }));
+            }
             return;
           }
 
