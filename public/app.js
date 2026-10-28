@@ -705,6 +705,7 @@ const BRIDGE_URL = window.location.origin;
 function getThemeVars() {
   const isDark = document.documentElement.getAttribute("data-theme") === "dark";
   return {
+    isDark,
     text: isDark ? "#f4f4f6" : "#18181b",
     body: isDark ? "#a1a1aa" : "#3f3f46",
     muted: isDark ? "#63636e" : "#71717a",
@@ -1256,26 +1257,23 @@ function initFileDependencyMap() {
         enabled: true,
         direction: "UD",
         sortMethod: "directed",
-        levelSeparation: 120,
-        nodeSpacing: 160
+        levelSeparation: 150,
+        nodeSpacing: 260,
+        treeSpacing: 220,
+        blockShifting: true,
+        edgeMinimization: true,
+        parentCentralization: true
       }
     },
     physics: {
-      enabled: true,
-      hierarchicalRepulsion: {
-        nodeDistance: 160,
-        centralGravity: 0.0,
-        springLength: 100,
-        springConstant: 0.01,
-        damping: 0.09
-      },
-      stabilization: {
-        enabled: true,
-        iterations: 60,
-        fit: true
-      }
+      enabled: false
     },
-    interaction: { hover: true }
+    interaction: {
+      hover: true,
+      tooltipDelay: 100,
+      zoomView: true,
+      dragView: true
+    }
   };
 
   fileNetwork = new vis.Network(container, { nodes: fileNodesDataset, edges: fileEdgesDataset }, options);
@@ -1287,20 +1285,20 @@ function initFileDependencyMap() {
     }
   });
 
-  renderFileDependencyMap();
+  renderFileDependencyMap(null, true);
 }
 
-function renderFileDependencyMap(highlightFileId = null) {
+function renderFileDependencyMap(highlightFileId = null, shouldFit = false) {
   const theme = getThemeVars();
   const nodes = [];
   const edges = [];
 
-  const layerLevelMap = {
+  const layerBaseMap = {
     ui: 1,
     architecture: 2,
-    api: 3,
-    database: 4,
-    rules: 5
+    api: 6,
+    database: 10,
+    rules: 14
   };
 
   const currentProject = getSelectedProject();
@@ -1319,6 +1317,13 @@ function renderFileDependencyMap(highlightFileId = null) {
     });
   }
 
+  // Prevent single horizontal line overflow for layers with many files
+  const layerIndices = {};
+  files.forEach(file => {
+    const l = file.layer || "architecture";
+    layerIndices[l] = 0;
+  });
+
   const validNodeIds = new Set();
   files.forEach(file => {
     validNodeIds.add(file.id);
@@ -1326,23 +1331,53 @@ function renderFileDependencyMap(highlightFileId = null) {
     const isNodeDimmed = highlightFileId && !connectedFiles.has(file.id);
     const isSelected = file.id === (highlightFileId || selectedFileId);
 
+    const layer = file.layer || "architecture";
+    const idxInLayer = layerIndices[layer]++;
+    const baseLevel = layerBaseMap[layer] || 2;
+    // Distribute into tiers of max 3 files per row so the graph stays compact and legible
+    const subTier = Math.floor(idxInLayer / 3);
+    const computedLevel = baseLevel + subTier;
+
+    const bgCol = isSelected
+      ? col
+      : (isNodeDimmed ? (theme.isDark ? "#121216" : "#f1f5f9") : (theme.isDark ? "#1c1d24" : "#ffffff"));
+    const borderCol = isSelected
+      ? "#ffffff"
+      : (isNodeDimmed ? (theme.isDark ? "#2e2e38" : "#cbd5e1") : col);
+    const fontCol = isSelected
+      ? "#ffffff"
+      : (isNodeDimmed ? (theme.isDark ? "#52525b" : "#94a3b8") : (theme.isDark ? "#f8fafc" : "#0f172a"));
+
     nodes.push({
       id: file.id,
-      label: `${file.name}\n[${file.gradleModule}]`,
-      level: layerLevelMap[file.layer] || 2,
+      label: `<b>${file.name}</b>\n[${file.gradleModule || ':' + layer}]`,
+      level: computedLevel,
       shape: "box",
-      margin: { top: 7, bottom: 7, left: 10, right: 10 },
+      margin: { top: 12, bottom: 12, left: 16, right: 16 },
+      shadow: {
+        enabled: !isNodeDimmed,
+        color: isSelected ? col : "rgba(0,0,0,0.45)",
+        size: isSelected ? 14 : 6,
+        x: 0,
+        y: isSelected ? 4 : 2
+      },
       color: {
-        background: isSelected ? col : theme.projBg,
-        border: isNodeDimmed ? theme.edge : col,
-        highlight: { background: col, border: theme.text }
+        background: bgCol,
+        border: borderCol,
+        highlight: { background: col, border: "#ffffff" },
+        hover: {
+          background: isSelected ? col : (theme.isDark ? "#282936" : "#f8fafc"),
+          border: col
+        }
       },
       font: {
-        color: isSelected ? "#ffffff" : (isNodeDimmed ? theme.muted : theme.text),
-        face: "JetBrains Mono",
-        size: 10.5
+        multi: "html",
+        color: fontCol,
+        face: "JetBrains Mono, monospace",
+        size: 13,
+        bold: { color: fontCol, size: 13, face: "JetBrains Mono, monospace" }
       },
-      borderWidth: isSelected ? 2 : 1.2
+      borderWidth: isSelected ? 2.8 : (isNodeDimmed ? 1.0 : 1.8)
     });
   });
 
@@ -1360,11 +1395,15 @@ function renderFileDependencyMap(highlightFileId = null) {
         from: file.id,
         to: targetId,
         color: {
-          color: isEdgeHighlighted ? theme.highlightEdge : theme.edge,
-          opacity: isEdgeDimmed ? 0.25 : 0.85
+          color: isEdgeHighlighted
+            ? theme.highlightEdge
+            : (theme.isDark ? "rgba(148, 163, 184, 0.45)" : "rgba(100, 116, 139, 0.45)"),
+          highlight: theme.highlightEdge,
+          hover: theme.highlightEdge,
+          opacity: isEdgeDimmed ? 0.2 : 0.85
         },
-        width: isEdgeHighlighted ? 2.2 : 1.1,
-        arrows: { to: { enabled: true, scaleFactor: 0.55 } },
+        width: isEdgeHighlighted ? 2.8 : 1.6,
+        arrows: { to: { enabled: true, scaleFactor: 0.75 } },
         smooth: { type: "cubicBezier", forceDirection: "vertical", roundness: 0.4 }
       });
     });
@@ -1379,12 +1418,14 @@ function renderFileDependencyMap(highlightFileId = null) {
     try {
       fileNetwork.setData({ nodes: fileNodesDataset, edges: fileEdgesDataset });
     } catch {}
-    setTimeout(() => {
-      try {
-        fileNetwork.redraw();
-        fileNetwork.fit({ animation: { duration: 250 } });
-      } catch {}
-    }, 60);
+    if (shouldFit) {
+      setTimeout(() => {
+        try {
+          fileNetwork.redraw();
+          fileNetwork.fit({ animation: { duration: 250 } });
+        } catch {}
+      }, 60);
+    }
   }
 }
 
@@ -1393,7 +1434,16 @@ async function focusFileNodeOnMap(fileId) {
   if (!fileObj) return;
 
   selectedFileId = fileId;
-  renderFileDependencyMap(fileId);
+  renderFileDependencyMap(fileId, false);
+
+  if (fileNetwork) {
+    try {
+      fileNetwork.focus(fileId, {
+        scale: 1.05,
+        animation: { duration: 350, easingFunction: "easeInOutQuad" }
+      });
+    } catch {}
+  }
 
   // If code is not loaded or is a comment stub, load real file content
   if (!fileObj.code || fileObj.code.startsWith('//')) {
@@ -1417,10 +1467,19 @@ async function focusFileNodeOnMap(fileId) {
 }
 
 function resetFileMapHighlight() {
-  renderFileDependencyMap(null);
+  renderFileDependencyMap(null, false);
   if (fileNetwork) {
     try { fileNetwork.fit({ animation: { duration: 250 } }); } catch {}
   }
+}
+
+function zoomFileMap(factor) {
+  if (!fileNetwork) return;
+  const currentScale = fileNetwork.getScale();
+  fileNetwork.moveTo({
+    scale: Math.max(0.35, Math.min(2.5, currentScale * factor)),
+    animation: { duration: 200 }
+  });
 }
 
 // ============================================================================
@@ -1807,13 +1866,20 @@ function switchWorkspaceMode(mode) {
       if (!fileNetwork) {
         initFileDependencyMap();
       } else {
-        renderFileDependencyMap(selectedFileId);
+        renderFileDependencyMap(selectedFileId, false);
       }
       setTimeout(() => {
         if (fileNetwork) {
           try {
             fileNetwork.redraw();
-            fileNetwork.fit({ animation: { duration: 250 } });
+            if (selectedFileId && fileNodesDataset.get(selectedFileId)) {
+              fileNetwork.focus(selectedFileId, {
+                scale: 1.0,
+                animation: { duration: 300 }
+              });
+            } else {
+              fileNetwork.fit({ animation: { duration: 250 } });
+            }
           } catch {}
         }
       }, 100);

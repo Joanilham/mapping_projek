@@ -123,7 +123,9 @@
             <div class="legend-item"><span class="dot dot-database"></span> :database / storage</div>
           </div>
           <div class="zoom-controls">
-            <button class="btn-mono" onclick="resetFileMapHighlight()">reset_highlight</button>
+            <button class="btn-mono" onclick="zoomFileMap(1.25)" title="Perbesar Tampilan">+</button>
+            <button class="btn-mono" onclick="zoomFileMap(0.8)" title="Perkecil Tampilan">−</button>
+            <button class="btn-mono" onclick="resetFileMapHighlight()">reset_focus</button>
             <button class="btn-mono" onclick="fitActiveGraph()">fit_view</button>
           </div>
         </div>
