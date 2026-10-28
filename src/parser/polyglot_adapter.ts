@@ -38,6 +38,9 @@ export class PolyglotAstAdapter {
     const fullPath = path.isAbsolute(relPath) ? relPath : path.join(this.workspacePath, relPath);
     const content = code !== undefined ? code : (fs.existsSync(fullPath) ? fs.readFileSync(fullPath, 'utf-8') : '');
     if (!content) return { nodes: [], edges: [] };
+    if (content.length > 600_000) {
+      throw new Error(`Ukuran berkas (${Math.round(content.length / 1024)} KB) melebihi batas aman 600 KB, dilewati untuk mencegah hang.`);
+    }
 
     // 1. JS / TS (Babel AST)
     if (['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'].includes(ext)) {

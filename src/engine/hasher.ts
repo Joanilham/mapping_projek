@@ -6,6 +6,7 @@ import { MemoryDatabase } from '../db/database.js';
 
 const DEFAULT_IGNORE = new Set([
   'node_modules',
+  'vendor',
   '.git',
   '.project-memory',
   'dist',
@@ -14,6 +15,16 @@ const DEFAULT_IGNORE = new Set([
   '.turbo',
   '.next',
   '.cache',
+  'storage',
+  'bootstrap/cache',
+  '__pycache__',
+  '.venv',
+  'venv',
+  'env',
+  'target',
+  '.idea',
+  '.vscode',
+  '.gradle',
   '.DS_Store'
 ]);
 

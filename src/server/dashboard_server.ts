@@ -20,6 +20,36 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
   let manager = new SessionManager(workspace);
   const requestedPort = options?.port !== undefined ? options.port : 3333;
 
+  let activeScanProgress: {
+    isScanning: boolean;
+    projectSlug: string;
+    rootPath: string;
+    phase: string;
+    currentFile: string;
+    currentIndex: number;
+    totalFiles: number;
+    percent: number;
+    errorCount: number;
+    errors: Array<{ file: string; message: string }>;
+    error: string | null;
+    result: any;
+    startTime: number;
+  } = {
+    isScanning: false,
+    projectSlug: '',
+    rootPath: '',
+    phase: 'idle',
+    currentFile: '',
+    currentIndex: 0,
+    totalFiles: 0,
+    percent: 0,
+    errorCount: 0,
+    errors: [],
+    error: null,
+    result: null,
+    startTime: 0
+  };
+
   return new Promise((resolve, reject) => {
     const server = http.createServer(async (req, res) => {
       // Set default CORS headers
@@ -88,6 +118,12 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
             return;
           }
 
+          if (pathname === '/api/scan_progress' && req.method === 'GET') {
+            res.writeHead(200);
+            res.end(JSON.stringify(activeScanProgress));
+            return;
+          }
+
           if (pathname === '/api/scan_project' && req.method === 'POST') {
             let body = '';
             req.on('data', chunk => { body += chunk; });
@@ -107,6 +143,23 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
                   return;
                 }
 
+                // Initialize progress tracking state
+                activeScanProgress = {
+                  isScanning: true,
+                  projectSlug: path.basename(resolved),
+                  rootPath: resolved,
+                  phase: 'discovering',
+                  currentFile: 'Memeriksa berkas & dependensi proyek...',
+                  currentIndex: 0,
+                  totalFiles: 0,
+                  percent: 5,
+                  errorCount: 0,
+                  errors: [],
+                  error: null,
+                  result: null,
+                  startTime: Date.now()
+                };
+
                 // If reset is requested, clear previous local memory for clean start
                 if (data.reset) {
                   const memDir = path.join(resolved, '.project-memory');
@@ -117,20 +170,50 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
 
                 // Switch server active manager to the target project!
                 manager = new SessionManager(resolved);
-                const initRes = manager.initProject();
+                const initRes = manager.initProject({
+                  onProgress: (p) => {
+                    activeScanProgress.phase = p.phase;
+                    activeScanProgress.currentFile = p.currentFile || '';
+                    activeScanProgress.currentIndex = p.currentIndex;
+                    activeScanProgress.totalFiles = p.totalFiles;
+                    activeScanProgress.errorCount = p.errorCount;
+                    if (p.totalFiles > 0) {
+                      activeScanProgress.percent = Math.min(98, Math.round((p.currentIndex / p.totalFiles) * 90) + 5);
+                    }
+                    if (p.lastError) {
+                      activeScanProgress.errors.push(p.lastError);
+                    }
+                    if (p.errors && p.errors.length > 0) {
+                      activeScanProgress.errors = p.errors;
+                    }
+                  }
+                });
 
-                res.writeHead(200);
-                res.end(JSON.stringify({
+                const scanResult = {
                   success: true,
                   projectSlug: manager.projectSlug,
                   name: manager.projectSlug,
                   rootPath: resolved,
                   totalFiles: initRes.totalFiles,
-                  dbPath: initRes.dbPath
-                }));
+                  dbPath: initRes.dbPath,
+                  errors: initRes.errors || []
+                };
+
+                activeScanProgress.isScanning = false;
+                activeScanProgress.phase = 'complete';
+                activeScanProgress.percent = 100;
+                activeScanProgress.currentFile = 'Pemindaian selesai!';
+                activeScanProgress.result = scanResult;
+
+                res.writeHead(200);
+                res.end(JSON.stringify(scanResult));
               } catch (err: any) {
+                activeScanProgress.isScanning = false;
+                activeScanProgress.phase = 'error';
+                activeScanProgress.error = err.message;
+
                 res.writeHead(500);
-                res.end(JSON.stringify({ error: err.message }));
+                res.end(JSON.stringify({ error: err.message, errors: activeScanProgress.errors }));
               }
             });
             return;

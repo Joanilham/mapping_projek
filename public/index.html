@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
-  <link rel="stylesheet" href="styles.css?v=2.6.2">
+  <link rel="stylesheet" href="styles.css?v=2.7.0">
 </head>
 <body>
   <!-- PANEL KIRI: EXPLORER CABANG & MODUL -->
@@ -352,6 +352,40 @@
         </label>
       </div>
 
+      <!-- PROGRESS BAR & STATUS PEMINDAIAN REAL-TIME -->
+      <div id="scanProgressCard" style="display:none; margin-bottom:14px; background:var(--bg-code); border:1px solid var(--border); border-radius:6px; padding:12px 14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <span style="font-weight:600; font-size:11.5px; font-family:'JetBrains Mono',monospace; color:var(--text-main);" id="scanProgressTitle">
+            ⏳ Sedang Memindai...
+          </span>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; font-weight:700; color:var(--c-arch);" id="scanPercentBadge">
+            0%
+          </span>
+        </div>
+
+        <!-- PROGRESS BAR TRACK -->
+        <div style="width:100%; height:7px; background:var(--bg-subtle); border-radius:4px; overflow:hidden; border:1px solid var(--border); margin-bottom:8px;">
+          <div id="scanProgressBar" style="width:0%; height:100%; background:linear-gradient(90deg, var(--c-arch), var(--c-api)); transition:width 0.2s ease;"></div>
+        </div>
+
+        <div style="font-size:11px; font-family:'JetBrains Mono',monospace; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center;">
+          <span id="scanCurrentFileLabel" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:320px;">
+            Menyiapkan pemindaian...
+          </span>
+          <span id="scanCountLabel" style="font-size:10.5px; color:var(--text-muted); white-space:nowrap;">
+            0 / 0 berkas
+          </span>
+        </div>
+
+        <!-- BOX WARNING & ERROR REAL-TIME -->
+        <div id="scanErrorsContainer" style="display:none; margin-top:10px; max-height:100px; overflow-y:auto; background:rgba(239, 68, 68, 0.08); border:1px solid rgba(239, 68, 68, 0.25); border-radius:4px; padding:8px 10px;">
+          <div style="font-size:10.5px; font-family:'JetBrains Mono',monospace; color:var(--c-danger); font-weight:600; margin-bottom:4px;" id="scanErrorsSummary">
+            ⚠ Terjadi Peringatan/Error:
+          </div>
+          <div id="scanErrorsList" style="font-size:10.5px; font-family:'JetBrains Mono',monospace; color:var(--text-body); line-height:1.5;"></div>
+        </div>
+      </div>
+
       <div class="modal-actions">
         <button class="btn-mono" onclick="closeModal('scanModal')">batal</button>
         <button class="btn-mono active" id="btnExecuteScan" onclick="executeGuiProjectScan()" style="background:var(--c-arch); color:#fff; border-color:var(--c-arch); font-weight:600;">
@@ -400,6 +434,6 @@
 
   <div class="toast" id="toastMessage"></div>
 
-  <script src="app.js?v=2.6.2"></script>
+  <script src="app.js?v=2.7.0"></script>
 </body>
 </html>

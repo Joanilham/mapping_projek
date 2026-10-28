@@ -2337,16 +2337,86 @@ function openScanModal() {
   loadDirectoryBrowser();
 }
 
+let scanProgressPoller = null;
+
 async function executeGuiProjectScan() {
   const pathVal = document.getElementById("scanPathInput").value.trim();
   if (!pathVal) {
-    showToast("Masukkan path folder proyek terlebih dahulu!");
+    showToast("Pilih folder proyek terlebih dahulu lewat tombol File Manager!");
     return;
   }
   const resetVal = document.getElementById("scanResetCheck").checked;
   const btn = document.getElementById("btnExecuteScan");
   btn.disabled = true;
   btn.textContent = "⏳ memindai...";
+
+  const progressCard = document.getElementById("scanProgressCard");
+  const progressBar = document.getElementById("scanProgressBar");
+  const percentBadge = document.getElementById("scanPercentBadge");
+  const progressTitle = document.getElementById("scanProgressTitle");
+  const currentFileLabel = document.getElementById("scanCurrentFileLabel");
+  const countLabel = document.getElementById("scanCountLabel");
+  const errorsContainer = document.getElementById("scanErrorsContainer");
+  const errorsList = document.getElementById("scanErrorsList");
+
+  if (progressCard) progressCard.style.display = "block";
+  if (progressBar) progressBar.style.width = "5%";
+  if (percentBadge) percentBadge.textContent = "5%";
+  if (progressTitle) progressTitle.textContent = "⏳ Sedang Memindai...";
+  if (currentFileLabel) currentFileLabel.textContent = "Memulai inisialisasi pemindai...";
+  if (countLabel) countLabel.textContent = "0 / 0 berkas";
+  if (errorsContainer) errorsContainer.style.display = "none";
+  if (errorsList) errorsList.innerHTML = "";
+
+  // Mulai polling progres setiap 160ms
+  if (scanProgressPoller) clearInterval(scanProgressPoller);
+  scanProgressPoller = setInterval(async () => {
+    try {
+      const pRes = await fetch(`${BRIDGE_URL}/api/scan_progress`);
+      if (!pRes.ok) return;
+      const p = await pRes.json();
+
+      if (progressBar) progressBar.style.width = `${p.percent || 5}%`;
+      if (percentBadge) percentBadge.textContent = `${p.percent || 5}%`;
+
+      if (p.phase === 'discovering') {
+        if (progressTitle) progressTitle.textContent = "🔍 Mengindeks Berkas...";
+        if (currentFileLabel) currentFileLabel.textContent = p.currentFile || "Mencari berkas kode...";
+      } else if (p.phase === 'parsing') {
+        if (progressTitle) progressTitle.textContent = "⚙ Parsing & Ekstraksi AST...";
+        if (currentFileLabel) currentFileLabel.textContent = p.currentFile || "Menganalisis berkas...";
+        if (countLabel) countLabel.textContent = `${p.currentIndex || 0} / ${p.totalFiles || 0} berkas`;
+      } else if (p.phase === 'resolving') {
+        if (progressTitle) progressTitle.textContent = "🔗 Menghubungkan Dependensi...";
+        if (currentFileLabel) currentFileLabel.textContent = p.currentFile || "Resolusi relasi antar-modul...";
+        if (countLabel) countLabel.textContent = `${p.totalFiles || 0} / ${p.totalFiles || 0} berkas`;
+      }
+
+      // Tampilkan error atau peringatan berkas secara real-time
+      if (p.errors && p.errors.length > 0) {
+        if (errorsContainer) errorsContainer.style.display = "block";
+        if (errorsList) {
+          errorsList.innerHTML = p.errors.slice(-8).map(e => `
+            <div style="margin-bottom:3px; word-break:break-all;">
+              <span style="color:var(--c-danger); font-weight:600;">• ${escapeHtml(e.file)}</span>: 
+              <span style="color:var(--text-muted);">${escapeHtml(e.message)}</span>
+            </div>
+          `).join('');
+        }
+      }
+
+      // Jika backend melaporkan error fatal
+      if (p.phase === 'error' || p.error) {
+        clearInterval(scanProgressPoller);
+        scanProgressPoller = null;
+        if (progressTitle) progressTitle.textContent = "❌ Pemindaian Terhenti / Error";
+        if (currentFileLabel) currentFileLabel.textContent = p.error || "Terjadi kesalahan saat memindai";
+        if (errorsContainer) errorsContainer.style.display = "block";
+        btn.disabled = false;
+        btn.textContent = "🚀 coba_lagi";
+      }
+    } catch {}
+  }, 160);
 
   try {
     const res = await fetch(`${BRIDGE_URL}/api/scan_project`, {
@@ -2355,9 +2425,17 @@ async function executeGuiProjectScan() {
       body: JSON.stringify({ path: pathVal, reset: resetVal })
     });
     const data = await res.json();
+
+    if (scanProgressPoller) {
+      clearInterval(scanProgressPoller);
+      scanProgressPoller = null;
+    }
+
     if (data.success) {
-      closeModal("scanModal");
-      showToast(`✅ Berhasil dipindai: ${data.projectSlug} (${data.totalFiles} berkas)`);
+      if (progressBar) progressBar.style.width = "100%";
+      if (percentBadge) percentBadge.textContent = "100%";
+      if (progressTitle) progressTitle.textContent = "✔ Pemindaian Berhasil!";
+      if (currentFileLabel) currentFileLabel.textContent = `Selesai: ${data.totalFiles} berkas berhasil dipetakan!`;
 
       // STRICT ISOLATION: When scanning Project A, Project B does not leak in!
       rawData = [];
@@ -2370,21 +2448,39 @@ async function executeGuiProjectScan() {
         localStorage.setItem("recent_scanned_projects", JSON.stringify(recent));
       } catch {}
 
-      await loadLiveDataFromBackend();
+      showToast(`✅ Berhasil dipindai: ${data.projectSlug} (${data.totalFiles} berkas)`, true);
 
-      const sel = document.getElementById("projectFilter");
-      if (sel) {
-        sel.value = data.projectSlug;
-      }
+      setTimeout(async () => {
+        closeModal("scanModal");
+        if (progressCard) progressCard.style.display = "none";
+        btn.disabled = false;
+        btn.textContent = "🚀 mulai_scan";
 
-      await handleFilterChange();
-      setTimeout(() => fitActiveGraph(), 200);
+        await loadLiveDataFromBackend();
+
+        const sel = document.getElementById("projectFilter");
+        if (sel) {
+          sel.value = data.projectSlug;
+        }
+
+        await handleFilterChange();
+        setTimeout(() => fitActiveGraph(), 200);
+      }, 900);
     } else {
+      if (progressTitle) progressTitle.textContent = "❌ Pemindaian Gagal";
+      if (currentFileLabel) currentFileLabel.textContent = data.error || "Direktori tidak valid atau tidak dapat diakses";
       showToast(`❌ Gagal: ${data.error || "Direktori tidak valid"}`);
+      btn.disabled = false;
+      btn.textContent = "🚀 mulai_scan";
     }
   } catch (err) {
+    if (scanProgressPoller) {
+      clearInterval(scanProgressPoller);
+      scanProgressPoller = null;
+    }
+    if (progressTitle) progressTitle.textContent = "❌ Terjadi Error";
+    if (currentFileLabel) currentFileLabel.textContent = err.message;
     showToast(`❌ Error: ${err.message}`);
-  } finally {
     btn.disabled = false;
     btn.textContent = "🚀 mulai_scan";
   }

@@ -13,6 +13,16 @@ import { SecurityAuditor, SecurityAuditResult, SecurityIssue } from './security_
 import { PerformanceAuditor, PerformanceAuditResult } from './performance_auditor.js';
 import { ModuleCategory, ModuleMemory, SessionCheckpoint, ColdStartDigest, CodeNode, CodeEdge, DataFlowTrace } from '../types/index.js';
 
+export interface ScanProgressInfo {
+  phase: 'discovering' | 'checksumming' | 'parsing' | 'resolving' | 'complete' | 'error';
+  currentFile?: string;
+  currentIndex: number;
+  totalFiles: number;
+  errorCount: number;
+  lastError?: { file: string; message: string };
+  errors?: Array<{ file: string; message: string }>;
+}
+
 export class SessionManager {
   public workspacePath: string;
   public projectSlug: string;
@@ -38,10 +48,11 @@ export class SessionManager {
   /**
    * Initialize or update project configuration & baseline checksums
    */
-  public initProject(options?: { name?: string; overview?: string; rules?: string }): {
+  public initProject(options?: { name?: string; overview?: string; rules?: string; onProgress?: (p: ScanProgressInfo) => void }): {
     projectSlug: string;
     totalFiles: number;
     dbPath: string;
+    errors?: Array<{ file: string; message: string }>;
   } {
     const existing = this.db.getProjectMeta(this.projectSlug);
 
@@ -89,26 +100,35 @@ export class SessionManager {
       last_active_task: existing?.last_active_task ?? 'Project initialized.'
     });
 
+    options?.onProgress?.({
+      phase: 'discovering',
+      currentIndex: 0,
+      totalFiles: 0,
+      errorCount: 0
+    });
+
     // Take initial baseline checksum snapshot
     const delta = this.hasher.syncChecksums();
 
     // Map initial codebase AST
-    this.mapCodebase({ forceAll: true });
+    const mapRes = this.mapCodebase({ forceAll: true, onProgress: options?.onProgress });
 
     return {
       projectSlug: this.projectSlug,
       totalFiles: delta.totalCount,
-      dbPath: this.db.dbPath
+      dbPath: this.db.dbPath,
+      errors: mapRes.errors
     };
   }
 
   /**
    * Scan and parse codebase into AST Nodes and Edges incrementally
    */
-  public mapCodebase(options?: { forceAll?: boolean }): {
+  public mapCodebase(options?: { forceAll?: boolean; onProgress?: (p: ScanProgressInfo) => void }): {
     scannedFiles: number;
     totalNodes: number;
     totalEdges: number;
+    errors: Array<{ file: string; message: string }>;
   } {
     const { delta } = this.hasher.computeDelta();
     const allFiles = this.hasher.scanFiles();
@@ -131,18 +151,56 @@ export class SessionManager {
       }
     }
 
+    const errors: Array<{ file: string; message: string }> = [];
+    const totalCount = filesToParse.length;
+
+    options?.onProgress?.({
+      phase: 'parsing',
+      currentIndex: 0,
+      totalFiles: totalCount,
+      errorCount: 0
+    });
+
+    let currentIdx = 0;
     for (const relPath of filesToParse) {
+      currentIdx++;
+      options?.onProgress?.({
+        phase: 'parsing',
+        currentFile: relPath,
+        currentIndex: currentIdx,
+        totalFiles: totalCount,
+        errorCount: errors.length
+      });
+
       try {
         this.db.clearFileGraph(this.projectSlug, relPath);
         const { nodes, edges } = this.polyglotAdapter.parse(relPath);
         this.db.saveCodeNodes(nodes);
         this.db.saveCodeEdges(edges);
-      } catch (err) {
-        console.warn(`[project-mapper] Warning: failed to parse ${relPath}:`, err);
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+        errors.push({ file: relPath, message: msg });
+        options?.onProgress?.({
+          phase: 'parsing',
+          currentFile: relPath,
+          currentIndex: currentIdx,
+          totalFiles: totalCount,
+          errorCount: errors.length,
+          lastError: { file: relPath, message: msg }
+        });
+        console.warn(`[project-mapper] Warning: failed to parse ${relPath}:`, msg);
       }
     }
 
     // Cross-file Dependency Injection & Interface resolution pass
+    options?.onProgress?.({
+      phase: 'resolving',
+      currentFile: 'Menyusun relasi ketergantungan arsitektur...',
+      currentIndex: totalCount,
+      totalFiles: totalCount,
+      errorCount: errors.length
+    });
+
     const allCurrentNodes = this.db.findNodes(this.projectSlug);
     const allCurrentEdges = this.db.getAllEdges(this.projectSlug);
     const diResolver = new DependencyInjectionResolver(this.projectSlug);
@@ -154,10 +212,20 @@ export class SessionManager {
 
     const totalNodes = allCurrentNodes.length;
     const allEdges = this.db.getAllEdges(this.projectSlug);
+
+    options?.onProgress?.({
+      phase: 'complete',
+      currentIndex: totalCount,
+      totalFiles: totalCount,
+      errorCount: errors.length,
+      errors
+    });
+
     return {
       scannedFiles: filesToParse.length,
       totalNodes,
-      totalEdges: allEdges.length
+      totalEdges: allEdges.length,
+      errors
     };
   }
 
