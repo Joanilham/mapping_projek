@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="id" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PROJECT MAPPER // mcp-memory architecture workbench</title>
+  <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="styles.css?v=2.5.3">
+</head>
+<body>
+  <!-- PANEL KIRI: EXPLORER CABANG & MODUL -->
+  <aside class="sidebar">
+    <div class="topbar">
+      <div class="brand">
+        <span>PROJECT MAPPER</span>
+        <span style="color:var(--text-muted)">//</span>
+        <span class="brand-badge">v2.5</span>
+      </div>
+      <div class="topbar-right">
+        <div class="status-pill">
+          <span id="bridgeDot" class="status-dot online"></span>
+          <span id="bridgeText">bridge:ok</span>
+        </div>
+        <button class="btn-mono" onclick="toggleTheme()" id="themeBtn">light</button>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="control-row">
+        <select id="projectFilter" onchange="handleFilterChange()">
+          <option value="ALL">all_projects</option>
+        </select>
+        <button class="btn-mono" onclick="openScanModal()" title="Pindai & Buka Folder Proyek Baru Tanpa Terminal" style="color:var(--c-arch); border-color:var(--c-arch); font-weight:600;">+ scan</button>
+        <button class="btn-danger-outline" onclick="handleClearProjectClick()" title="Drop seluruh memori proyek terpilih">drop</button>
+      </div>
+      <div class="control-row" style="margin-top:6px;">
+        <button class="btn-mono active" id="btn-sync-vault" data-testid="sync-vault-btn" onclick="handleSyncVaultClick()" title="Sinkronkan 19 Modul my-music dari MCP Vault (~/.local/share/mcp-memory/projects_vault.db)" style="width:100%; justify-content:center; background:var(--c-arch); color:#fff; border-color:var(--c-arch); font-weight:600; cursor:pointer;">
+          🔄 Sinkronkan Memori MCP Vault
+        </button>
+      </div>
+      <div id="sync-status" class="sync-status-text" style="display:none; font-size:11px; margin-top:4px; font-family:'JetBrains Mono',monospace; color:var(--c-arch);"></div>
+      <input type="text" id="searchInput" placeholder="Cari modul, file, atau aturan..." oninput="handleFilterChange()">
+    </div>
+
+    <div class="list-header">
+      <span>Hirarki Cabang (<span id="moduleCount">0</span>)</span>
+      <div class="branch-actions">
+        <span class="branch-action-link" onclick="toggleAllBranches(false)" title="Buka semua cabang">[+buka]</span>
+        <span class="branch-action-link" onclick="toggleAllBranches(true)" title="Tutup semua cabang">[-tutup]</span>
+      </div>
+    </div>
+
+    <div class="module-list" id="sidebar-module-list" data-testid="sidebar-module-list"></div>
+  </aside>
+
+  <!-- PANEL TENGAH: 3-MODE WORKSPACE -->
+  <main class="workspace-main">
+    <header class="workspace-topbar">
+      <div class="mode-tabs">
+        <button class="mode-tab active" id="tabModeGraph" onclick="switchWorkspaceMode('graph')">
+          <span class="mode-num">01</span> MEMORY_GRAPH
+        </button>
+        <button class="mode-tab" id="tabModeFiles" onclick="switchWorkspaceMode('files')">
+          <span class="mode-num">02</span> FILE_DEPENDENCY_MAP
+        </button>
+        <button class="mode-tab" id="tabModeFlow" onclick="switchWorkspaceMode('flow')">
+          <span class="mode-num">03</span> DATA_FLOW_PIPELINE
+        </button>
+        <button class="mode-tab" id="tabModeSecurity" onclick="switchWorkspaceMode('security')">
+          <span class="mode-num">04</span> AUDIT_KEAMANAN
+        </button>
+        <button class="mode-tab" id="tabModePerformance" onclick="switchWorkspaceMode('performance')">
+          <span class="mode-num">05</span> PERFORMA_N1
+        </button>
+      </div>
+
+      <div style="display:flex; gap:6px; align-items:center;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--text-muted);" id="activeModeStatus">
+          Klik cabang kategori untuk buka/tutup simpul
+        </span>
+      </div>
+    </header>
+
+    <div class="workspace-stage">
+      <!-- MODE 1: MEMORY GRAPH -->
+      <section class="stage-view active" id="viewGraph">
+        <div class="canvas-hint" id="graphHintBox">
+          TIP: Klik cabang kategori (architecture/api/db/rules/ui) untuk Collapse/Expand • Klik modul untuk inspeksi
+        </div>
+        <div id="networkCanvas"></div>
+        <div class="canvas-toolbar">
+          <div class="legend-bar">
+            <div class="legend-item"><span class="dot dot-architecture"></span> architecture</div>
+            <div class="legend-item"><span class="dot dot-api"></span> api</div>
+            <div class="legend-item"><span class="dot dot-database"></span> database</div>
+            <div class="legend-item"><span class="dot dot-rules"></span> rules</div>
+            <div class="legend-item"><span class="dot dot-ui"></span> ui</div>
+            <div class="legend-item"><span class="legend-dash"></span> module_dep</div>
+          </div>
+          <div class="zoom-controls">
+            <button class="btn-mono" onclick="toggleAllBranches(false)">expand_all</button>
+            <button class="btn-mono" onclick="toggleAllBranches(true)">collapse_all</button>
+            <button class="btn-mono" onclick="fitActiveGraph()">fit_view</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- MODE 2: FILE DEPENDENCY MAP -->
+      <section class="stage-view" id="viewFiles">
+        <div class="canvas-hint">
+          PETA BERKAS PROYEK: Menunjukkan hubungan import/ketergantungan langsung antar-file lintas modul
+        </div>
+        <div id="fileMapCanvas"></div>
+        <div class="canvas-toolbar">
+          <div class="legend-bar">
+            <div class="legend-item"><span class="dot dot-ui"></span> :ui / client</div>
+            <div class="legend-item"><span class="dot dot-architecture"></span> :engine / core</div>
+            <div class="legend-item"><span class="dot dot-api"></span> :api & parser</div>
+            <div class="legend-item"><span class="dot dot-database"></span> :database / storage</div>
+          </div>
+          <div class="zoom-controls">
+            <button class="btn-mono" onclick="resetFileMapHighlight()">reset_highlight</button>
+            <button class="btn-mono" onclick="fitActiveGraph()">fit_view</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- MODE 3: DATA FLOW & EXECUTION PIPELINE -->
+      <section class="stage-view" id="viewFlow">
+        <div class="pipeline-container">
+          <div class="pipeline-controls-card">
+            <div class="scenario-selector" id="scenarioSelector"></div>
+            <div class="sim-transport">
+              <button class="btn-mono" onclick="stepSimulation(-1)">◀ prev_step</button>
+              <button class="btn-mono active" id="btnAutoPlay" onclick="toggleAutoPlaySimulation()">▶ play_flow</button>
+              <button class="btn-mono" onclick="stepSimulation(1)">next_step ▶</button>
+              <button class="btn-mono" onclick="resetSimulation()">reset</button>
+            </div>
+          </div>
+
+          <div class="pipeline-diagram">
+            <div class="pipeline-header-bar">
+              <div>
+                <span style="color:var(--text-muted)">PIPELINE_SCENARIO // </span>
+                <strong id="pipeScenarioTitle" style="color:var(--text-main)">-</strong>
+              </div>
+              <div id="pipeStepCounter" style="color:var(--c-api)">STEP 1 / 5</div>
+            </div>
+
+            <div class="pipeline-nodes-track" id="pipelineNodesTrack"></div>
+          </div>
+
+          <div class="pipeline-inspector-grid">
+            <div class="telemetry-card">
+              <div class="telemetry-header">
+                <span>PACKET_PAYLOAD & DATA_TRANSFORMATION</span>
+                <span id="payloadTypeBadge" style="color:var(--c-arch)">StateFlow / SQLite / HTTP</span>
+              </div>
+              <div class="telemetry-body" id="pipePayloadViewer"></div>
+            </div>
+
+            <div class="telemetry-card">
+              <div class="telemetry-header">
+                <span>STATE_ENGINE & TELEMETRI EKSEKUSI</span>
+                <span style="color:var(--c-rules)">Runtime Tracer</span>
+              </div>
+              <div class="state-kv-list" id="pipeStateMetrics"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- MODE 4: AUDIT KEAMANAN -->
+      <section class="stage-view" id="viewSecurity">
+        <div class="audit-panel-container">
+          <div class="audit-header-card">
+            <div class="audit-badge-box">
+              <div class="audit-grade-pill" id="securityGradeBadge">GRADE -</div>
+              <div>
+                <h3 style="margin:0 0 4px 0; font-size:15px; color:var(--text-main);">Global Security Auditor</h3>
+                <div style="font-size:12px; color:var(--text-muted);" id="securityScoreSummary">Memindai kerentanan kode...</div>
+              </div>
+            </div>
+            <div class="audit-actions">
+              <button class="btn-mono active" id="btnRefreshSecurity" onclick="loadSecurityAudit(true)">🔄 Jalankan Ulang Audit Keamanan</button>
+            </div>
+          </div>
+
+          <div class="audit-stats-grid">
+            <div class="stat-card" style="border-left: 3px solid var(--c-danger);">
+              <span class="stat-num" id="statSecCritical">0</span>
+              <span class="stat-label">CRITICAL</span>
+            </div>
+            <div class="stat-card" style="border-left: 3px solid #f97316;">
+              <span class="stat-num" id="statSecHigh">0</span>
+              <span class="stat-label">HIGH</span>
+            </div>
+            <div class="stat-card" style="border-left: 3px solid var(--c-rules);">
+              <span class="stat-num" id="statSecMedium">0</span>
+              <span class="stat-label">MEDIUM</span>
+            </div>
+            <div class="stat-card" style="border-left: 3px solid var(--c-arch);">
+              <span class="stat-num" id="statSecLow">0</span>
+              <span class="stat-label">LOW</span>
+            </div>
+          </div>
+
+          <div class="audit-filter-bar">
+            <span>Filter Severity:</span>
+            <button class="btn-mono active" id="secFilterAll" onclick="filterSecurityIssues('ALL')">Semua</button>
+            <button class="btn-mono" id="secFilterCritical" onclick="filterSecurityIssues('CRITICAL')">Critical</button>
+            <button class="btn-mono" id="secFilterHigh" onclick="filterSecurityIssues('HIGH')">High</button>
+            <button class="btn-mono" id="secFilterMedium" onclick="filterSecurityIssues('MEDIUM')">Medium</button>
+          </div>
+
+          <div class="audit-issues-list" id="securityIssuesList"></div>
+        </div>
+      </section>
+
+      <!-- MODE 5: AUDIT PERFORMA & N+1 -->
+      <section class="stage-view" id="viewPerformance">
+        <div class="audit-panel-container">
+          <div class="audit-header-card">
+            <div class="audit-badge-box">
+              <div class="audit-grade-pill" id="perfHealthBadge">HEALTH -</div>
+              <div>
+                <h3 style="margin:0 0 4px 0; font-size:15px; color:var(--text-main);">Global Performance Auditor</h3>
+                <div style="font-size:12px; color:var(--text-muted);" id="perfScoreSummary">Menganalisis 3D N+1 Queries & Index Schema Differ...</div>
+              </div>
+            </div>
+            <div class="audit-actions">
+              <button class="btn-mono active" id="btnRefreshPerf" onclick="loadPerformanceAudit(true)">⚡ Jalankan Ulang Audit Performa</button>
+            </div>
+          </div>
+
+          <div class="audit-stats-grid">
+            <div class="stat-card" style="border-left: 3px solid var(--c-rules);">
+              <span class="stat-num" id="statPerfN1">0</span>
+              <span class="stat-label">3D N+1 QUERIES</span>
+            </div>
+            <div class="stat-card" style="border-left: 3px solid var(--c-api);">
+              <span class="stat-num" id="statPerfMissingIdx">0</span>
+              <span class="stat-label">MISSING FK INDEXES</span>
+            </div>
+          </div>
+
+          <div class="perf-sections-wrapper">
+            <div class="perf-section">
+              <h4 style="margin:16px 0 8px 0; font-size:13px; color:var(--text-main); display:flex; align-items:center; gap:8px;">
+                <span class="dot dot-rules"></span> Deteksi N+1 Queries (Direct Loops, Inter-procedural & Lazy Loading)
+              </h4>
+              <div id="perfN1List" class="audit-issues-list"></div>
+            </div>
+
+            <div class="perf-section">
+              <h4 style="margin:24px 0 8px 0; font-size:13px; color:var(--text-main); display:flex; align-items:center; gap:8px;">
+                <span class="dot dot-database"></span> Rekomendasi Index Foreign Key (Cross-File Schema Differ)
+              </h4>
+              <div id="perfMissingIdxList" class="audit-issues-list"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- PANEL KANAN: INSPECTOR SPESIFIKASI, KODE FITUR & STATE -->
+  <aside class="inspector" id="inspectorPanel">
+    <div class="empty-state">Pilih simpul modul atau berkas untuk menginspeksi arsitektur & kode fitur.</div>
+  </aside>
+
+  <!-- MODAL SCAN PROYEK BARU DARI GUI -->
+  <div class="modal-overlay" id="scanModal">
+    <div class="modal-box" style="max-width: 520px;">
+      <div class="modal-title">📂 scan_new_project // gui_wizard</div>
+      <div class="modal-desc">
+        Pindai dan buka proyek apa pun langsung dari browser tanpa perlu mengetik perintah terminal. Memori AI terisolasi 100% (0 Token LLM).
+      </div>
+      <div style="margin: 14px 0;">
+        <label style="display:block; font-size:11px; font-family:'JetBrains Mono',monospace; color:var(--text-muted); margin-bottom:6px;">
+          PATH DIREKTORI PROYEK (Folder Absolut atau Relatif):
+        </label>
+        <input type="text" id="scanPathInput" placeholder="/run/media/joan/7838E7CB38E7868A/Projek/NamaProjek">
+        
+        <div style="margin-top:10px; display:flex; align-items:center; gap:8px;">
+          <input type="checkbox" id="scanResetCheck" checked style="accent-color:var(--c-arch); cursor:pointer;">
+          <label for="scanResetCheck" style="font-size:11.5px; color:var(--text-body); cursor:pointer;">
+            Mulai bersih (bersihkan sisa cache memori lama proyek ini)
+          </label>
+        </div>
+
+        <div style="margin-top:10px;">
+          <span style="font-size:10px; font-family:'JetBrains Mono',monospace; color:var(--text-muted);">Saran Cepat:</span>
+          <div style="display:flex; flex-wrap:wrap; gap:5px; margin-top:4px;" id="scanQuickSuggestions"></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-mono" onclick="closeModal('scanModal')">batal</button>
+        <button class="btn-mono active" id="btnExecuteScan" onclick="executeGuiProjectScan()" style="background:var(--c-arch); color:#fff; border-color:var(--c-arch);">
+          🚀 mulai_scan
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL DELETE -->
+  <div class="modal-overlay" id="deleteModal">
+    <div class="modal-box">
+      <div class="modal-title">delete_project_context</div>
+      <div class="modal-desc" id="deleteModalDesc"></div>
+      <div class="modal-actions">
+        <button class="btn-mono" onclick="closeModal('deleteModal')">cancel</button>
+        <button class="btn-danger-solid" onclick="executeDeleteModule()">confirm_delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL CLEAR -->
+  <div class="modal-overlay" id="clearModal">
+    <div class="modal-box">
+      <div class="modal-title">clear_project_memory</div>
+      <div class="modal-desc" id="clearModalDesc"></div>
+      <div class="modal-actions">
+        <button class="btn-mono" onclick="closeModal('clearModal')">cancel</button>
+        <button class="btn-danger-solid" onclick="executeClearProject()">confirm_drop</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL CLI FALLBACK -->
+  <div class="modal-overlay" id="cliFallbackModal">
+    <div class="modal-box">
+      <div class="modal-title">bridge_offline // cli_command</div>
+      <div class="modal-desc">Jalankan perintah berikut di terminal:</div>
+      <div class="cli-box" id="cliCommandBox"></div>
+      <div class="modal-actions">
+        <button class="btn-mono" onclick="closeModal('cliFallbackModal')">close</button>
+        <button class="btn-mono" onclick="copyCliCommand()">copy</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toastMessage"></div>
+
+  <script src="app.js?v=2.5.3"></script>
+</body>
+</html>

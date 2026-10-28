@@ -1,0 +1,3 @@
+# Ignore memory sqlite db
+*.db
+*.db-journal

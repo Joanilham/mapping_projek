@@ -1,0 +1,32 @@
+{
+  "name": "mapping-projek",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "project-mapper": "./bin/project-mapper.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "tsx src/cli/index.ts",
+    "test": "tsx --test 'tests/**/*.test.ts' 'tests/*.test.ts'",
+    "ui": "tsx src/server/dashboard_server.ts",
+    "mcp": "tsx src/mcp/server.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@babel/parser": "^8.0.8",
+    "@babel/traverse": "^8.0.7",
+    "@types/babel__traverse": "^7.28.0",
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
+  }
+}

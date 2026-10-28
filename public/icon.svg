@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#09090b" />
+      <stop offset="50%" stop-color="#121217" />
+      <stop offset="100%" stop-color="#181820" />
+    </linearGradient>
+
+    <!-- Node Glow Effects -->
+    <filter id="glowArch" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <filter id="glowApi" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+
+    <!-- Edge Gradients -->
+    <linearGradient id="edgeBlueGreen" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#10b981" />
+    </linearGradient>
+    <linearGradient id="edgeBluePurple" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+    <linearGradient id="edgeGreenAmber" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#f59e0b" />
+    </linearGradient>
+  </defs>
+
+  <!-- Base App Card with Rounded Corners & Glow Border -->
+  <rect x="24" y="24" width="464" height="464" rx="100" fill="url(#bgGrad)" stroke="#383842" stroke-width="6" />
+  <rect x="30" y="30" width="452" height="452" rx="94" fill="none" stroke="#3b82f6" stroke-width="2" stroke-opacity="0.4" />
+
+  <!-- Graph Connections / Edges -->
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <!-- Center to Left (Logic to Entry) -->
+    <line x1="256" y1="230" x2="140" y2="140" stroke="url(#edgeBlueGreen)" stroke-width="6" stroke-opacity="0.8" />
+    <!-- Center to Right (Logic to Model) -->
+    <line x1="256" y1="230" x2="372" y2="150" stroke="url(#edgeBluePurple)" stroke-width="6" stroke-opacity="0.8" />
+    <!-- Center to Bottom Left (Logic to DB) -->
+    <line x1="256" y1="230" x2="160" y2="360" stroke="#8b5cf6" stroke-width="6" stroke-opacity="0.8" />
+    <!-- Center to Bottom Right (Logic to Security/Rules) -->
+    <line x1="256" y1="230" x2="352" y2="360" stroke="url(#edgeGreenAmber)" stroke-width="6" stroke-opacity="0.8" />
+    <!-- Entry to Security Orbit Edge -->
+    <path d="M 140 140 Q 256 70 372 150" fill="none" stroke="#3b82f6" stroke-width="3" stroke-dasharray="8 8" stroke-opacity="0.5" />
+    <!-- Cross Model-DB Edge -->
+    <line x1="372" y1="150" x2="352" y2="360" stroke="#ec4899" stroke-width="4" stroke-opacity="0.6" />
+  </g>
+
+  <!-- Graph Nodes -->
+  <!-- 1. Central Core Node (Architecture Engine) -->
+  <circle cx="256" cy="230" r="44" fill="#16161a" stroke="#3b82f6" stroke-width="8" filter="url(#glowArch)" />
+  <circle cx="256" cy="230" r="22" fill="#3b82f6" />
+  <path d="M 244 230 L 268 230 M 256 218 L 256 242" stroke="#ffffff" stroke-width="4" stroke-linecap="round" />
+
+  <!-- 2. Top-Left Node (API & Entry) -->
+  <circle cx="140" cy="140" r="32" fill="#16161a" stroke="#10b981" stroke-width="6" filter="url(#glowApi)" />
+  <circle cx="140" cy="140" r="14" fill="#10b981" />
+
+  <!-- 3. Top-Right Node (Model & ORM) -->
+  <circle cx="372" cy="150" r="34" fill="#16161a" stroke="#8b5cf6" stroke-width="6" />
+  <circle cx="372" cy="150" r="16" fill="#8b5cf6" />
+
+  <!-- 4. Bottom-Left Node (Database Sink) -->
+  <circle cx="160" cy="360" r="30" fill="#16161a" stroke="#ec4899" stroke-width="6" />
+  <circle cx="160" cy="360" r="13" fill="#ec4899" />
+
+  <!-- 5. Bottom-Right Node (Security Shield / Rules) -->
+  <circle cx="352" cy="360" r="32" fill="#16161a" stroke="#f59e0b" stroke-width="6" />
+  <circle cx="352" cy="360" r="14" fill="#f59e0b" />
+
+  <!-- Decorative Orbit Satellite Nodes -->
+  <circle cx="96" cy="270" r="8" fill="#3b82f6" opacity="0.6" />
+  <circle cx="410" cy="280" r="10" fill="#10b981" opacity="0.6" />
+  <circle cx="256" cy="410" r="8" fill="#8b5cf6" opacity="0.6" />
+</svg>

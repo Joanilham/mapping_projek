@@ -1,0 +1,19 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Project Mapper
+GenericName=Codebase Architecture & Security Mapper
+Comment=Universal Polyglot Codebase Mapper, Global Security & Performance Auditor, and Multi-Project Memory Bridge
+Exec=/home/joan/.local/bin/project-mapper
+Icon=/home/joan/.local/share/icons/hicolor/scalable/apps/project-mapper.svg
+Path=/run/media/joan/7838E7CB38E7868A/Projek/Mapping Projek
+Terminal=false
+Categories=Development;IDE;Profiling;Security;
+Keywords=codebase;architecture;security;auditor;mcp;mapper;performance;
+StartupNotify=true
+StartupWMClass=project-mapper
+Actions=OpenDashboard;
+
+[Desktop Action OpenDashboard]
+Name=Buka Visual Dashboard (Port 3333)
+Exec=/home/joan/.local/bin/project-mapper
