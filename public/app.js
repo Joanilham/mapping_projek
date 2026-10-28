@@ -2046,20 +2046,36 @@ async function handleFilterChange() {
   if (!currentActive || (selectedProject !== "ALL" && currentActive.project !== selectedProject)) {
     if (filteredMods.length > 0) {
       selectModule(filteredMods[0].id, false);
+    } else {
+      selectedId = null;
+      selectedFileId = null;
+      const insp = document.getElementById("inspectorPanel");
+      if (insp) {
+        insp.innerHTML = '<div class="empty-state">Pilih simpul modul atau berkas untuk menginspeksi arsitektur & kode fitur.</div>';
+      }
     }
   }
 
-  // 2. Refresh sidebar and memory graph
+  // 2. Synchronize active project with backend bridge if connected
+  if (BRIDGE_URL) {
+    fetch(`${BRIDGE_URL}/api/set_active_project`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project: selectedProject })
+    }).catch(() => {});
+  }
+
+  // 3. Refresh sidebar and memory graph
   renderSidebarList();
   syncMemoryGraphData(true);
 
-  // 3. Load files dynamically for the selected project
+  // 4. Load files dynamically for the selected project
   await loadProjectFiles(currentProject);
   if (fileNetwork) {
-    renderFileDependencyMap();
+    renderFileDependencyMap(null, true);
   }
 
-  // 4. Update audits for the selected project
+  // 5. Update audits for the selected project
   if (currentWorkspaceMode === "security") {
     loadSecurityAudit(false);
   } else if (currentWorkspaceMode === "performance") {
@@ -2497,6 +2513,7 @@ async function executeDeleteModule() {
   if (!pendingDeleteTarget) return;
   closeModal("deleteModal");
   const { project, moduleName } = pendingDeleteTarget;
+  pendingDeleteTarget = null;
 
   try {
     const res = await fetch(`${BRIDGE_URL}/api/delete`, {
@@ -2507,9 +2524,11 @@ async function executeDeleteModule() {
     const result = await res.json();
     if (result.success) {
       rawData = rawData.filter(d => !(d.project === project && d.module === moduleName));
+      selectedId = null;
       showToast(`deleted: ${moduleName}`);
-      document.getElementById("inspectorPanel").innerHTML = '<div class="empty-state">Modul telah dihapus.</div>';
-      updateProjectFilterOptions();
+      const insp = document.getElementById("inspectorPanel");
+      if (insp) insp.innerHTML = '<div class="empty-state">Modul telah dihapus.</div>';
+      await updateProjectFilterOptions();
       renderSidebarList();
       syncMemoryGraphData(true);
       return;
@@ -2529,7 +2548,7 @@ function handleClearProjectClick() {
   }
   pendingClearProject = proj;
   document.getElementById("clearModalDesc").innerHTML =
-    `Hapus seluruh modul pada proyek <code>${proj}</code>?`;
+    `Hapus seluruh modul & data memori pada proyek <code>${proj}</code>?`;
   openModal("clearModal");
 }
 
@@ -2537,6 +2556,7 @@ async function executeClearProject() {
   if (!pendingClearProject) return;
   closeModal("clearModal");
   const project = pendingClearProject;
+  pendingClearProject = null;
 
   try {
     const res = await fetch(`${BRIDGE_URL}/api/clear`, {
@@ -2546,15 +2566,54 @@ async function executeClearProject() {
     });
     const result = await res.json();
     if (result.success) {
+      // 1. Completely strip dropped project from client memory stores
       rawData = rawData.filter(d => d.project !== project);
+      projectFilesRegistry = projectFilesRegistry.filter(f => f.project !== project);
+
+      // 2. Invalidate audit caches
+      if (typeof securityAuditCache !== "undefined" && securityAuditCache) {
+        delete securityAuditCache[project];
+      }
+      if (typeof performanceAuditCache !== "undefined" && performanceAuditCache) {
+        delete performanceAuditCache[project];
+      }
+
+      // 3. Clear inspector if active module or file belonged to dropped project
+      const currentActive = rawData.find(d => d.id === selectedId);
+      const currentFile = projectFilesRegistry.find(f => f.id === selectedFileId);
+      if (!currentActive || currentActive.project === project || !currentFile || currentFile.project === project) {
+        selectedId = null;
+        selectedFileId = null;
+        const insp = document.getElementById("inspectorPanel");
+        if (insp) {
+          insp.innerHTML = '<div class="empty-state">Pilih simpul modul atau berkas untuk menginspeksi arsitektur & kode fitur.</div>';
+        }
+      }
+
+      // 4. Update dropdown filter options from backend
+      await updateProjectFilterOptions();
+
+      // 5. Select next active project
+      const selectEl = document.getElementById("projectFilter");
+      const nextProj = result.nextActiveProject || (rawData[0]?.project) || "mapping-projek";
+      const availableValues = Array.from(selectEl.options).map(o => o.value);
+      if (availableValues.includes(nextProj)) {
+        selectEl.value = nextProj;
+      } else if (availableValues.includes("mapping-projek")) {
+        selectEl.value = "mapping-projek";
+      } else {
+        selectEl.value = availableValues.includes("ALL") ? "ALL" : (availableValues[0] || "ALL");
+      }
+
       showToast(`dropped: ${project}`);
-      updateProjectFilterOptions();
-      document.getElementById("projectFilter").value = "ALL";
-      renderSidebarList();
-      syncMemoryGraphData(true);
+
+      // 6. Synchronize view to next active project
+      await handleFilterChange();
       return;
     }
-  } catch {}
+  } catch (err) {
+    console.error("Gagal melakukan drop proyek:", err);
+  }
 
   const cliCmd = `node ./bin/project-mapper.js clear`;
   document.getElementById("cliCommandBox").textContent = cliCmd;

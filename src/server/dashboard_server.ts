@@ -476,6 +476,33 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
             return;
           }
 
+          if (pathname === '/api/set_active_project' && req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => {
+              try {
+                const data = JSON.parse(body || '{}');
+                const targetSlug = data.project;
+                if (targetSlug && targetSlug !== 'ALL') {
+                  const meta = manager.db.getProjectMeta(targetSlug);
+                  if (meta && meta.root_path && fs.existsSync(meta.root_path)) {
+                    manager = new SessionManager(meta.root_path, targetSlug);
+                  } else {
+                    manager.projectSlug = targetSlug;
+                  }
+                } else if (targetSlug === 'ALL') {
+                  manager = new SessionManager(workspace);
+                }
+                res.writeHead(200);
+                res.end(JSON.stringify({ success: true, activeProject: manager.projectSlug }));
+              } catch (err: any) {
+                res.writeHead(400);
+                res.end(JSON.stringify({ error: err.message }));
+              }
+            });
+            return;
+          }
+
           if (pathname === '/api/clear' && req.method === 'POST') {
             let body = '';
             req.on('data', chunk => { body += chunk; });
@@ -483,12 +510,45 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
               try {
                 const data = JSON.parse(body || '{}');
                 const project = data.project || manager.projectSlug;
-                const mods = manager.db.getModules(project);
-                for (const m of mods) {
-                  manager.db.deleteModule(project, m.module_name);
+
+                // 1. Drop all records across all tables in the active manager DB
+                manager.dropProject(project);
+
+                // 2. If active manager was in another folder (e.g. external scanned folder), also wipe from workspace DB
+                if (manager.workspacePath !== workspace) {
+                  try {
+                    const wsManager = new SessionManager(workspace);
+                    wsManager.dropProject(project);
+                  } catch {}
                 }
+
+                // 3. Reset manager back to workspace root if it was on the dropped project or external
+                if (manager.projectSlug === project || manager.workspacePath !== workspace) {
+                  manager = new SessionManager(workspace);
+                }
+
+                // 4. Retrieve remaining distinct project slugs
+                const metaProjects = manager.db.getRawDb().prepare('SELECT DISTINCT project_slug FROM project_meta').all() as any[];
+                const modProjects = manager.db.getRawDb().prepare('SELECT DISTINCT project_slug FROM module_memory').all() as any[];
+                const nodeProjects = manager.db.getRawDb().prepare('SELECT DISTINCT project_slug FROM code_nodes').all() as any[];
+                const allSlugs = [...new Set([
+                  manager.projectSlug,
+                  ...metaProjects.map(p => p.project_slug),
+                  ...modProjects.map(p => p.project_slug),
+                  ...nodeProjects.map(p => p.project_slug)
+                ])].filter(p => p && p !== project);
+
+                const nextActiveProject = allSlugs.includes(manager.projectSlug) && manager.projectSlug !== project
+                  ? manager.projectSlug
+                  : (allSlugs[0] || 'mapping-projek');
+
                 res.writeHead(200);
-                res.end(JSON.stringify({ success: true, project }));
+                res.end(JSON.stringify({
+                  success: true,
+                  project,
+                  nextActiveProject,
+                  projects: allSlugs
+                }));
               } catch (err: any) {
                 res.writeHead(400);
                 res.end(JSON.stringify({ error: err.message }));

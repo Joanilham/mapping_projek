@@ -520,6 +520,24 @@ export class MemoryDatabase {
     this.db.prepare('DELETE FROM code_edges WHERE project_slug = ?').run(projectSlug);
   }
 
+  public dropProject(projectSlug: string): void {
+    const tables = [
+      'project_meta',
+      'project_memory',
+      'module_memory',
+      'session_checkpoints',
+      'file_checksums',
+      'decision_log',
+      'code_nodes',
+      'code_edges'
+    ];
+    for (const table of tables) {
+      try {
+        this.db.prepare(`DELETE FROM ${table} WHERE project_slug = ?`).run(projectSlug);
+      } catch {}
+    }
+  }
+
   public getCodeNode(id: string): CodeNode | null {
     const stmt = this.db.prepare('SELECT * FROM code_nodes WHERE id = ?');
     const r = stmt.get(id) as any;

@@ -324,6 +324,13 @@ export class SessionManager {
   }
 
   /**
+   * Completely drop a project and all its stored nodes, edges, modules, and metadata
+   */
+  public dropProject(projectSlug: string): void {
+    this.db.dropProject(projectSlug);
+  }
+
+  /**
    * Synchronize project memory modules from global MCP Vault (~/.local/share/mcp-memory/projects_vault.db)
    * with SQLite transaction (BEGIN IMMEDIATE ... COMMIT) and composite upsert (project_slug, category, module_name).
    */
