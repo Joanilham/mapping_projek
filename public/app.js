@@ -1033,6 +1033,9 @@ function syncMemoryGraphData(fullRebuild = false) {
 function initMemoryGraph() {
   const container = document.getElementById("networkCanvas");
   const options = {
+    nodes: {
+      font: { minVisible: 9 }
+    },
     physics: {
       solver: "forceAtlas2Based",
       forceAtlas2Based: {
@@ -1252,6 +1255,9 @@ function initFileDependencyMap() {
   if (!container) return;
 
   const options = {
+    nodes: {
+      font: { minVisible: 11 }
+    },
     layout: {
       hierarchical: {
         enabled: true,
@@ -1285,7 +1291,12 @@ function initFileDependencyMap() {
     }
   });
 
+  fileNetwork.on("zoom", () => {
+    updateFileZoomDisplay();
+  });
+
   renderFileDependencyMap(null, true);
+  updateFileZoomDisplay();
 }
 
 function renderFileDependencyMap(highlightFileId = null, shouldFit = false) {
@@ -1476,10 +1487,19 @@ function resetFileMapHighlight() {
 function zoomFileMap(factor) {
   if (!fileNetwork) return;
   const currentScale = fileNetwork.getScale();
+  const nextScale = Math.max(0.2, Math.min(3.0, currentScale * factor));
   fileNetwork.moveTo({
-    scale: Math.max(0.35, Math.min(2.5, currentScale * factor)),
+    scale: nextScale,
     animation: { duration: 200 }
   });
+  setTimeout(updateFileZoomDisplay, 220);
+}
+
+function updateFileZoomDisplay() {
+  const el = document.getElementById("fileZoomLevel");
+  if (el && fileNetwork) {
+    el.textContent = `${Math.round(fileNetwork.getScale() * 100)}%`;
+  }
 }
 
 // ============================================================================
@@ -1909,7 +1929,76 @@ function fitActiveGraph() {
     network.fit({ animation: { duration: 280 } });
   } else if (currentWorkspaceMode === "files" && fileNetwork) {
     fileNetwork.fit({ animation: { duration: 280 } });
+    setTimeout(updateFileZoomDisplay, 300);
   }
+}
+
+function toggleSidebar() {
+  document.body.classList.toggle("sidebar-collapsed");
+  const isCollapsed = document.body.classList.contains("sidebar-collapsed");
+  const icon = document.getElementById("sidebarToggleIcon");
+  if (icon) icon.textContent = isCollapsed ? "▶" : "◀";
+  const btn = document.getElementById("btnToggleSidebar");
+  if (btn) btn.classList.toggle("active", isCollapsed);
+
+  setTimeout(() => {
+    if (currentWorkspaceMode === "graph" && network) {
+      network.redraw();
+      network.fit({ animation: { duration: 250 } });
+    } else if (currentWorkspaceMode === "files" && fileNetwork) {
+      fileNetwork.redraw();
+      fileNetwork.fit({ animation: { duration: 250 } });
+      setTimeout(updateFileZoomDisplay, 260);
+    }
+  }, 290);
+}
+
+function toggleInspector() {
+  document.body.classList.toggle("inspector-collapsed");
+  const isCollapsed = document.body.classList.contains("inspector-collapsed");
+  const icon = document.getElementById("inspectorToggleIcon");
+  if (icon) icon.textContent = isCollapsed ? "◀" : "▶";
+  const btn = document.getElementById("btnToggleInspector");
+  if (btn) btn.classList.toggle("active", isCollapsed);
+
+  setTimeout(() => {
+    if (currentWorkspaceMode === "graph" && network) {
+      network.redraw();
+      network.fit({ animation: { duration: 250 } });
+    } else if (currentWorkspaceMode === "files" && fileNetwork) {
+      fileNetwork.redraw();
+      fileNetwork.fit({ animation: { duration: 250 } });
+      setTimeout(updateFileZoomDisplay, 260);
+    }
+  }, 290);
+}
+
+function toggleFullscreenCanvas() {
+  const isBothCollapsed = document.body.classList.contains("sidebar-collapsed") &&
+                          document.body.classList.contains("inspector-collapsed");
+  if (isBothCollapsed) {
+    document.body.classList.remove("sidebar-collapsed", "inspector-collapsed");
+  } else {
+    document.body.classList.add("sidebar-collapsed", "inspector-collapsed");
+  }
+
+  const isLeftCollapsed = document.body.classList.contains("sidebar-collapsed");
+  const isRightCollapsed = document.body.classList.contains("inspector-collapsed");
+  const iconL = document.getElementById("sidebarToggleIcon");
+  if (iconL) iconL.textContent = isLeftCollapsed ? "▶" : "◀";
+  const iconR = document.getElementById("inspectorToggleIcon");
+  if (iconR) iconR.textContent = isRightCollapsed ? "◀" : "▶";
+
+  setTimeout(() => {
+    if (currentWorkspaceMode === "graph" && network) {
+      network.redraw();
+      network.fit({ animation: { duration: 250 } });
+    } else if (currentWorkspaceMode === "files" && fileNetwork) {
+      fileNetwork.redraw();
+      fileNetwork.fit({ animation: { duration: 250 } });
+      setTimeout(updateFileZoomDisplay, 260);
+    }
+  }, 290);
 }
 
 async function handleFilterChange() {
@@ -2534,4 +2623,19 @@ async function loadPerformanceAudit(forceRefresh = false) {
   }
   if (forceRefresh) showToast(`Audit performa [${currentProject}] selesai!`, true);
 }
+
+// Global Keyboard Shortcuts for Panel Management
+window.addEventListener("keydown", (e) => {
+  if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable)) return;
+  if (e.key === "[" || (e.ctrlKey && e.key === "b")) {
+    e.preventDefault();
+    toggleSidebar();
+  } else if (e.key === "]") {
+    e.preventDefault();
+    toggleInspector();
+  } else if (e.key === "f" || e.key === "F") {
+    e.preventDefault();
+    toggleFullscreenCanvas();
+  }
+});
 

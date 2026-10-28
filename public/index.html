@@ -60,32 +60,49 @@
   <!-- PANEL TENGAH: 3-MODE WORKSPACE -->
   <main class="workspace-main">
     <header class="workspace-topbar">
-      <div class="mode-tabs">
-        <button class="mode-tab active" id="tabModeGraph" onclick="switchWorkspaceMode('graph')">
-          <span class="mode-num">01</span> MEMORY_GRAPH
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button class="btn-panel-toggle" id="btnToggleSidebar" onclick="toggleSidebar()" title="Sembunyikan/Tampilkan Explorer (Hotkey: [)">
+          <span id="sidebarToggleIcon">◀</span>
+          <span class="btn-toggle-label">Explorer</span>
         </button>
-        <button class="mode-tab" id="tabModeFiles" onclick="switchWorkspaceMode('files')">
-          <span class="mode-num">02</span> FILE_DEPENDENCY_MAP
-        </button>
-        <button class="mode-tab" id="tabModeFlow" onclick="switchWorkspaceMode('flow')">
-          <span class="mode-num">03</span> DATA_FLOW_PIPELINE
-        </button>
-        <button class="mode-tab" id="tabModeSecurity" onclick="switchWorkspaceMode('security')">
-          <span class="mode-num">04</span> AUDIT_KEAMANAN
-        </button>
-        <button class="mode-tab" id="tabModePerformance" onclick="switchWorkspaceMode('performance')">
-          <span class="mode-num">05</span> PERFORMA_N1
-        </button>
+        <div class="mode-tabs">
+          <button class="mode-tab active" id="tabModeGraph" onclick="switchWorkspaceMode('graph')">
+            <span class="mode-num">01</span> MEMORY_GRAPH
+          </button>
+          <button class="mode-tab" id="tabModeFiles" onclick="switchWorkspaceMode('files')">
+            <span class="mode-num">02</span> FILE_DEPENDENCY_MAP
+          </button>
+          <button class="mode-tab" id="tabModeFlow" onclick="switchWorkspaceMode('flow')">
+            <span class="mode-num">03</span> DATA_FLOW_PIPELINE
+          </button>
+          <button class="mode-tab" id="tabModeSecurity" onclick="switchWorkspaceMode('security')">
+            <span class="mode-num">04</span> AUDIT_KEAMANAN
+          </button>
+          <button class="mode-tab" id="tabModePerformance" onclick="switchWorkspaceMode('performance')">
+            <span class="mode-num">05</span> PERFORMA_N1
+          </button>
+        </div>
       </div>
 
-      <div style="display:flex; gap:6px; align-items:center;">
+      <div style="display:flex; gap:8px; align-items:center;">
         <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--text-muted);" id="activeModeStatus">
           Klik cabang kategori untuk buka/tutup simpul
         </span>
+        <button class="btn-panel-toggle" id="btnToggleInspector" onclick="toggleInspector()" title="Sembunyikan/Tampilkan Inspector (Hotkey: ])">
+          <span class="btn-toggle-label">Inspector</span>
+          <span id="inspectorToggleIcon">▶</span>
+        </button>
       </div>
     </header>
 
     <div class="workspace-stage">
+      <!-- FLOATING EDGE EXPANDERS (MUNCUL SAAT PANEL DITUTUP) -->
+      <button class="edge-toggle edge-toggle-left" onclick="toggleSidebar()" title="Buka Explorer Sidebar (Hotkey: [)">
+        <span>◀ EXPAND EXPLORER</span>
+      </button>
+      <button class="edge-toggle edge-toggle-right" onclick="toggleInspector()" title="Buka Inspector Panel (Hotkey: ])">
+        <span>INSPECTOR ▶</span>
+      </button>
       <!-- MODE 1: MEMORY GRAPH -->
       <section class="stage-view active" id="viewGraph">
         <div class="canvas-hint" id="graphHintBox">
@@ -123,10 +140,12 @@
             <div class="legend-item"><span class="dot dot-database"></span> :database / storage</div>
           </div>
           <div class="zoom-controls">
+            <span id="fileZoomLevel" class="zoom-badge" title="Tingkat Zoom Kanvas">100%</span>
             <button class="btn-mono" onclick="zoomFileMap(1.25)" title="Perbesar Tampilan">+</button>
             <button class="btn-mono" onclick="zoomFileMap(0.8)" title="Perkecil Tampilan">−</button>
-            <button class="btn-mono" onclick="resetFileMapHighlight()">reset_focus</button>
-            <button class="btn-mono" onclick="fitActiveGraph()">fit_view</button>
+            <button class="btn-mono" onclick="resetFileMapHighlight()" title="Reset Fokus Berkas">reset_focus</button>
+            <button class="btn-mono" onclick="fitActiveGraph()" title="Sesuaikan Tampilan ke Tengah">fit_view</button>
+            <button class="btn-mono" onclick="toggleFullscreenCanvas()" title="Mode Layar Penuh Kanvas (Hotkey: F)">⛶ full</button>
           </div>
         </div>
       </section>
