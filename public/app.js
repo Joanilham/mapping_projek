@@ -706,14 +706,15 @@ function getThemeVars() {
   const isDark = document.documentElement.getAttribute("data-theme") === "dark";
   return {
     isDark,
-    text: isDark ? "#f4f4f6" : "#18181b",
-    body: isDark ? "#a1a1aa" : "#3f3f46",
-    muted: isDark ? "#63636e" : "#71717a",
-    edge: isDark ? "#27272f" : "#d4d4d8",
-    projBg: isDark ? "#16161a" : "#ffffff",
-    projBorder: isDark ? "#52525b" : "#52525b",
-    depEdge: isDark ? "#63636e" : "#71717a",
+    text: isDark ? "#f4f4f6" : "#0f172a",
+    body: isDark ? "#a1a1aa" : "#334155",
+    muted: isDark ? "#71717a" : "#64748b",
+    edge: isDark ? "#27272f" : "#cbd5e1",
+    projBg: isDark ? "#18181f" : "#ffffff",
+    projBorder: isDark ? "#383842" : "#94a3b8",
+    depEdge: isDark ? "#52525b" : "#64748b",
     highlightEdge: isDark ? "#3b82f6" : "#2563eb",
+    fontBg: isDark ? "rgba(9, 9, 11, 0.72)" : "rgba(248, 250, 252, 0.85)",
     colors: {
       architecture: isDark ? "#3b82f6" : "#2563eb",
       api: isDark ? "#10b981" : "#059669",
@@ -893,14 +894,19 @@ function syncMemoryGraphData(fullRebuild = false) {
         id: pId,
         label: isProjCollapsed ? `[+] ${item.project}` : `[-] ${item.project}`,
         shape: "box",
-        margin: { top: 8, bottom: 8, left: 12, right: 12 },
+        margin: { top: 8, bottom: 8, left: 14, right: 14 },
         color: {
           background: theme.projBg,
           border: theme.projBorder,
-          highlight: { background: theme.projBg, border: theme.text }
+          highlight: { background: theme.projBg, border: theme.highlightEdge }
         },
-        font: { color: theme.text, face: "JetBrains Mono", size: 12, bold: true },
-        borderWidth: 1.5,
+        font: {
+          color: theme.text,
+          face: "JetBrains Mono, monospace",
+          size: 12,
+          bold: true
+        },
+        borderWidth: 1.8,
         nodeType: "project",
         project: item.project
       });
@@ -920,18 +926,19 @@ function syncMemoryGraphData(fullRebuild = false) {
         id: cId,
         label: catLabel,
         shape: "box",
-        margin: { top: 5, bottom: 5, left: 9, right: 9 },
+        margin: { top: 6, bottom: 6, left: 10, right: 10 },
         color: {
           background: isCatCollapsed ? col : theme.projBg,
           border: col,
-          highlight: { background: col, border: theme.text }
+          highlight: { background: col, border: theme.isDark ? "#ffffff" : "#0f172a" }
         },
         font: {
           color: isCatCollapsed ? "#ffffff" : theme.text,
-          face: "JetBrains Mono",
-          size: 10.5
+          face: "JetBrains Mono, monospace",
+          size: 11,
+          bold: true
         },
-        borderWidth: 1.5,
+        borderWidth: 1.8,
         nodeType: "category",
         project: item.project,
         category: item.category
@@ -956,18 +963,20 @@ function syncMemoryGraphData(fullRebuild = false) {
       id: mId,
       label: item.module,
       shape: "dot",
-      size: isSelected ? 15 : 11,
+      size: isSelected ? 15 : 10,
       color: {
-        background: isSelected ? theme.text : col,
-        border: col,
-        highlight: { background: theme.text, border: col }
+        background: col,
+        border: isSelected ? (theme.isDark ? "#ffffff" : "#0f172a") : col,
+        highlight: { background: col, border: theme.isDark ? "#ffffff" : "#0f172a" }
       },
       font: {
         color: theme.text,
-        face: "JetBrains Mono",
-        size: isSelected ? 11.5 : 10.5
+        face: "JetBrains Mono, monospace",
+        size: isSelected ? 12 : 11,
+        bold: isSelected,
+        background: theme.fontBg
       },
-      borderWidth: isSelected ? 2.5 : 1.5,
+      borderWidth: isSelected ? 3 : 1.5,
       nodeType: "module",
       raw: item
     });
@@ -1299,21 +1308,53 @@ function initFileDependencyMap() {
   updateFileZoomDisplay();
 }
 
+function computeTopologicalLevels(files) {
+  const fileMap = new Map();
+  files.forEach(f => fileMap.set(f.id, f));
+
+  const incoming = new Map();
+  files.forEach(f => incoming.set(f.id, []));
+
+  files.forEach(f => {
+    (f.imports || []).forEach(targetId => {
+      if (fileMap.has(targetId) && targetId !== f.id) {
+        incoming.get(targetId).push(f.id);
+      }
+    });
+  });
+
+  const depths = new Map();
+  function getDepth(id, visited = new Set()) {
+    if (depths.has(id)) return depths.get(id);
+    if (visited.has(id)) return 0;
+    visited.add(id);
+
+    const inc = incoming.get(id) || [];
+    if (inc.length === 0) {
+      depths.set(id, 0);
+      return 0;
+    }
+
+    let maxD = 0;
+    for (const parentId of inc) {
+      const d = getDepth(parentId, new Set(visited));
+      if (d + 1 > maxD) maxD = d + 1;
+    }
+    depths.set(id, maxD);
+    return maxD;
+  }
+
+  files.forEach(f => getDepth(f.id));
+  return depths;
+}
+
 function renderFileDependencyMap(highlightFileId = null, shouldFit = false) {
   const theme = getThemeVars();
   const nodes = [];
   const edges = [];
 
-  const layerBaseMap = {
-    ui: 1,
-    architecture: 2,
-    api: 6,
-    database: 10,
-    rules: 14
-  };
-
   const currentProject = getSelectedProject();
-  const files = projectFilesRegistry.filter(f => f.project === currentProject || currentProject === "ALL");
+  const files = projectFilesRegistry.filter(f => (f.project || "mapping-projek") === currentProject || currentProject === "ALL");
 
   const connectedFiles = new Set();
   if (highlightFileId) {
@@ -1328,12 +1369,9 @@ function renderFileDependencyMap(highlightFileId = null, shouldFit = false) {
     });
   }
 
-  // Prevent single horizontal line overflow for layers with many files
-  const layerIndices = {};
-  files.forEach(file => {
-    const l = file.layer || "architecture";
-    layerIndices[l] = 0;
-  });
+  // Hitung tingkat kedalaman hierarki arsitektur secara topologis (DAG)
+  // File pemanggil/entry di atas (level 0), file dependensi mengalir konsisten ke bawah
+  const topologicalDepths = computeTopologicalLevels(files);
 
   const validNodeIds = new Set();
   files.forEach(file => {
@@ -1343,17 +1381,14 @@ function renderFileDependencyMap(highlightFileId = null, shouldFit = false) {
     const isSelected = file.id === (highlightFileId || selectedFileId);
 
     const layer = file.layer || "architecture";
-    const idxInLayer = layerIndices[layer]++;
-    const baseLevel = layerBaseMap[layer] || 2;
-    // Distribute into tiers of max 3 files per row so the graph stays compact and legible
-    const subTier = Math.floor(idxInLayer / 3);
-    const computedLevel = baseLevel + subTier;
+    const computedLevel = topologicalDepths.get(file.id) || 0;
 
+    // Kontras tinggi untuk mode gelap dan mode terang
     const bgCol = isSelected
       ? col
-      : (isNodeDimmed ? (theme.isDark ? "#121216" : "#f1f5f9") : (theme.isDark ? "#1c1d24" : "#ffffff"));
+      : (isNodeDimmed ? (theme.isDark ? "#121216" : "#f1f5f9") : (theme.isDark ? "#18181f" : "#ffffff"));
     const borderCol = isSelected
-      ? "#ffffff"
+      ? (theme.isDark ? "#ffffff" : "#0f172a")
       : (isNodeDimmed ? (theme.isDark ? "#2e2e38" : "#cbd5e1") : col);
     const fontCol = isSelected
       ? "#ffffff"
@@ -1364,20 +1399,20 @@ function renderFileDependencyMap(highlightFileId = null, shouldFit = false) {
       label: `<b>${file.name}</b>\n[${file.gradleModule || ':' + layer}]`,
       level: computedLevel,
       shape: "box",
-      margin: { top: 12, bottom: 12, left: 16, right: 16 },
+      margin: { top: 10, bottom: 10, left: 14, right: 14 },
       shadow: {
         enabled: !isNodeDimmed,
-        color: isSelected ? col : "rgba(0,0,0,0.45)",
-        size: isSelected ? 14 : 6,
+        color: isSelected ? col : (theme.isDark ? "rgba(0,0,0,0.55)" : "rgba(15,23,42,0.08)"),
+        size: isSelected ? 16 : 8,
         x: 0,
         y: isSelected ? 4 : 2
       },
       color: {
         background: bgCol,
         border: borderCol,
-        highlight: { background: col, border: "#ffffff" },
+        highlight: { background: col, border: theme.isDark ? "#ffffff" : "#0f172a" },
         hover: {
-          background: isSelected ? col : (theme.isDark ? "#282936" : "#f8fafc"),
+          background: isSelected ? col : (theme.isDark ? "#23232c" : "#f8fafc"),
           border: col
         }
       },
@@ -1385,8 +1420,8 @@ function renderFileDependencyMap(highlightFileId = null, shouldFit = false) {
         multi: "html",
         color: fontCol,
         face: "JetBrains Mono, monospace",
-        size: 13,
-        bold: { color: fontCol, size: 13, face: "JetBrains Mono, monospace" }
+        size: 12.5,
+        bold: { color: fontCol, size: 12.5, face: "JetBrains Mono, monospace" }
       },
       borderWidth: isSelected ? 2.8 : (isNodeDimmed ? 1.0 : 1.8)
     });
@@ -1394,7 +1429,7 @@ function renderFileDependencyMap(highlightFileId = null, shouldFit = false) {
 
   files.forEach(file => {
     (file.imports || []).forEach(targetId => {
-      // Rule 5: Graph Anti-Crash Invariant - resolve any dangling edge: both from and to must exist in nodes!
+      // Graph Anti-Crash Invariant: both from and to must exist in valid nodes
       if (!validNodeIds.has(targetId)) return;
 
       const isEdgeHighlighted = highlightFileId &&
@@ -1408,14 +1443,14 @@ function renderFileDependencyMap(highlightFileId = null, shouldFit = false) {
         color: {
           color: isEdgeHighlighted
             ? theme.highlightEdge
-            : (theme.isDark ? "rgba(148, 163, 184, 0.45)" : "rgba(100, 116, 139, 0.45)"),
+            : (theme.isDark ? "rgba(148, 163, 184, 0.45)" : "rgba(71, 85, 105, 0.55)"),
           highlight: theme.highlightEdge,
           hover: theme.highlightEdge,
-          opacity: isEdgeDimmed ? 0.2 : 0.85
+          opacity: isEdgeDimmed ? 0.18 : 0.85
         },
         width: isEdgeHighlighted ? 2.8 : 1.6,
         arrows: { to: { enabled: true, scaleFactor: 0.75 } },
-        smooth: { type: "cubicBezier", forceDirection: "vertical", roundness: 0.4 }
+        smooth: { type: "cubicBezier", forceDirection: "vertical", roundness: 0.35 }
       });
     });
   });
@@ -1875,11 +1910,11 @@ function switchWorkspaceMode(mode) {
   const statusEl = document.getElementById("activeModeStatus");
   if (mode === "graph") {
     stopAutoPlaySimulation();
-    statusEl.textContent = "Klik cabang kategori untuk buka/tutup simpul";
+    if (statusEl) statusEl.textContent = "01 // Cabang Arsitektur";
     setTimeout(() => network && network.fit({ animation: { duration: 250 } }), 60);
   } else if (mode === "files") {
     stopAutoPlaySimulation();
-    statusEl.textContent = "Klik berkas untuk melihat alur import & kode sumber";
+    if (statusEl) statusEl.textContent = "02 // Ketergantungan Berkas";
     const proj = getSelectedProject();
     const hasFiles = projectFilesRegistry.some(f => f.project === proj || proj === "ALL");
     const renderCb = () => {
@@ -1911,15 +1946,15 @@ function switchWorkspaceMode(mode) {
       renderCb();
     }
   } else if (mode === "flow") {
-    statusEl.textContent = "Simulasi interaktif aliran paket data & execution pipeline";
+    if (statusEl) statusEl.textContent = "03 // Pipeline Aliran Data";
     initDataFlowSimulator();
   } else if (mode === "security") {
     stopAutoPlaySimulation();
-    statusEl.textContent = "Audit Keamanan Global (SQLi, XSS, Hardcoded Secrets, Mass Assignment)";
+    if (statusEl) statusEl.textContent = "04 // Audit Keamanan";
     loadSecurityAudit(false);
   } else if (mode === "performance") {
     stopAutoPlaySimulation();
-    statusEl.textContent = "Audit Performa Global (3D N+1 Queries & Missing Foreign Key Indexes)";
+    if (statusEl) statusEl.textContent = "05 // Audit Performa N+1";
     loadPerformanceAudit(false);
   }
 }
@@ -2067,6 +2102,11 @@ function toggleTheme() {
   btn.textContent = next === "dark" ? "light" : "dark";
   syncMemoryGraphData(false);
   if (fileNetwork) renderFileDependencyMap(selectedFileId);
+  if (currentWorkspaceMode === "flow") {
+    renderCurrentSimulationState();
+  } else if (currentWorkspaceMode === "security") {
+    renderSecurityIssues();
+  }
 }
 
 // ============================================================================

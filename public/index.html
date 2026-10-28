@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
-  <link rel="stylesheet" href="styles.css?v=2.5.3">
+  <link rel="stylesheet" href="styles.css?v=2.6.0">
 </head>
 <body>
   <!-- PANEL KIRI: EXPLORER CABANG & MODUL -->
@@ -60,33 +60,33 @@
   <!-- PANEL TENGAH: 3-MODE WORKSPACE -->
   <main class="workspace-main">
     <header class="workspace-topbar">
-      <div style="display:flex; align-items:center; gap:8px;">
+      <div class="topbar-left-cluster">
         <button class="btn-panel-toggle" id="btnToggleSidebar" onclick="toggleSidebar()" title="Sembunyikan/Tampilkan Explorer (Hotkey: [)">
           <span id="sidebarToggleIcon">◀</span>
           <span class="btn-toggle-label">Explorer</span>
         </button>
         <div class="mode-tabs">
-          <button class="mode-tab active" id="tabModeGraph" onclick="switchWorkspaceMode('graph')">
-            <span class="mode-num">01</span> MEMORY_GRAPH
+          <button class="mode-tab active" id="tabModeGraph" onclick="switchWorkspaceMode('graph')" title="Mode 1: Memory Module Graph">
+            <span class="mode-num">01</span> GRAPH
           </button>
-          <button class="mode-tab" id="tabModeFiles" onclick="switchWorkspaceMode('files')">
-            <span class="mode-num">02</span> FILE_DEPENDENCY_MAP
+          <button class="mode-tab" id="tabModeFiles" onclick="switchWorkspaceMode('files')" title="Mode 2: File Dependency Map">
+            <span class="mode-num">02</span> FILES
           </button>
-          <button class="mode-tab" id="tabModeFlow" onclick="switchWorkspaceMode('flow')">
-            <span class="mode-num">03</span> DATA_FLOW_PIPELINE
+          <button class="mode-tab" id="tabModeFlow" onclick="switchWorkspaceMode('flow')" title="Mode 3: Interactive Data Flow Pipeline">
+            <span class="mode-num">03</span> PIPELINE
           </button>
-          <button class="mode-tab" id="tabModeSecurity" onclick="switchWorkspaceMode('security')">
-            <span class="mode-num">04</span> AUDIT_KEAMANAN
+          <button class="mode-tab" id="tabModeSecurity" onclick="switchWorkspaceMode('security')" title="Mode 4: Global Security Audit">
+            <span class="mode-num">04</span> SECURITY
           </button>
-          <button class="mode-tab" id="tabModePerformance" onclick="switchWorkspaceMode('performance')">
-            <span class="mode-num">05</span> PERFORMA_N1
+          <button class="mode-tab" id="tabModePerformance" onclick="switchWorkspaceMode('performance')" title="Mode 5: Performance & N+1 Audit">
+            <span class="mode-num">05</span> PERFORMANCE
           </button>
         </div>
       </div>
 
-      <div style="display:flex; gap:8px; align-items:center;">
-        <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--text-muted);" id="activeModeStatus">
-          Klik cabang kategori untuk buka/tutup simpul
+      <div class="topbar-right-cluster">
+        <span class="topbar-status-badge" id="activeModeStatus" title="Status Mode">
+          Klik cabang kategori untuk navigasi
         </span>
         <button class="btn-panel-toggle" id="btnToggleInspector" onclick="toggleInspector()" title="Sembunyikan/Tampilkan Inspector (Hotkey: ])">
           <span class="btn-toggle-label">Inspector</span>
@@ -367,6 +367,6 @@
 
   <div class="toast" id="toastMessage"></div>
 
-  <script src="app.js?v=2.5.3"></script>
+  <script src="app.js?v=2.6.0"></script>
 </body>
 </html>
