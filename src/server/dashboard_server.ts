@@ -190,7 +190,8 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
           }
 
           if (pathname === '/api/graph' && req.method === 'GET') {
-            const project = (parsedUrl.query.project as string) || manager.projectSlug;
+            const rawProject = parsedUrl.query.project as string;
+            const project = (!rawProject || rawProject === 'ALL') ? manager.projectSlug : rawProject;
             let nodes = manager.db.findNodes(project);
             let edges = manager.db.getAllEdges(project);
 

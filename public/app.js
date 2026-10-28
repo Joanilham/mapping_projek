@@ -685,7 +685,7 @@ let fileEdgesDataset = new vis.DataSet();
 
 let currentWorkspaceMode = "graph"; // 'graph' | 'files' | 'flow'
 let selectedId = 1; // Default ke system_overview
-let selectedFileId = "f_session_mgr";
+let selectedFileId = null;
 let activeInspectorTab = "spec"; // 'spec' | 'code' | 'state'
 
 // Pelacak cabang kategori yang ditutup (collapsed)
@@ -1256,11 +1256,25 @@ function initFileDependencyMap() {
         enabled: true,
         direction: "UD",
         sortMethod: "directed",
-        levelSeparation: 115,
-        nodeSpacing: 150
+        levelSeparation: 120,
+        nodeSpacing: 160
       }
     },
-    physics: false,
+    physics: {
+      enabled: true,
+      hierarchicalRepulsion: {
+        nodeDistance: 160,
+        centralGravity: 0.0,
+        springLength: 100,
+        springConstant: 0.01,
+        damping: 0.09
+      },
+      stabilization: {
+        enabled: true,
+        iterations: 60,
+        fit: true
+      }
+    },
     interaction: { hover: true }
   };
 
@@ -1309,7 +1323,7 @@ function renderFileDependencyMap(highlightFileId = null) {
   files.forEach(file => {
     validNodeIds.add(file.id);
     const col = theme.colors[file.layer] || theme.colors.default;
-    const isDimmed = highlightFileId && !connectedFiles.has(file.id);
+    const isNodeDimmed = highlightFileId && !connectedFiles.has(file.id);
     const isSelected = file.id === (highlightFileId || selectedFileId);
 
     nodes.push({
@@ -1320,11 +1334,11 @@ function renderFileDependencyMap(highlightFileId = null) {
       margin: { top: 7, bottom: 7, left: 10, right: 10 },
       color: {
         background: isSelected ? col : theme.projBg,
-        border: isDimmed ? theme.edge : col,
+        border: isNodeDimmed ? theme.edge : col,
         highlight: { background: col, border: theme.text }
       },
       font: {
-        color: isSelected ? "#ffffff" : (isDimmed ? theme.muted : theme.text),
+        color: isSelected ? "#ffffff" : (isNodeDimmed ? theme.muted : theme.text),
         face: "JetBrains Mono",
         size: 10.5
       },
@@ -1339,6 +1353,7 @@ function renderFileDependencyMap(highlightFileId = null) {
 
       const isEdgeHighlighted = highlightFileId &&
         (file.id === highlightFileId || targetId === highlightFileId);
+      const isEdgeDimmed = highlightFileId && !isEdgeHighlighted;
 
       edges.push({
         id: `fe_${file.id}_${targetId}`,
@@ -1346,7 +1361,7 @@ function renderFileDependencyMap(highlightFileId = null) {
         to: targetId,
         color: {
           color: isEdgeHighlighted ? theme.highlightEdge : theme.edge,
-          opacity: isDimmed && !isEdgeHighlighted ? 0.25 : 0.9
+          opacity: isEdgeDimmed ? 0.25 : 0.85
         },
         width: isEdgeHighlighted ? 2.2 : 1.1,
         arrows: { to: { enabled: true, scaleFactor: 0.55 } },
@@ -1361,6 +1376,9 @@ function renderFileDependencyMap(highlightFileId = null) {
   fileEdgesDataset.add(edges);
 
   if (fileNetwork) {
+    try {
+      fileNetwork.setData({ nodes: fileNodesDataset, edges: fileEdgesDataset });
+    } catch {}
     setTimeout(() => {
       try {
         fileNetwork.redraw();
