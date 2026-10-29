@@ -17,8 +17,20 @@ export interface DashboardServerOptions {
 
 export function startDashboardServer(options?: DashboardServerOptions): Promise<{ server: http.Server; port: number; url: string }> {
   const workspace = options?.workspacePath || process.cwd();
-  let manager = new SessionManager(workspace);
+  const masterManager = new SessionManager(workspace);
+  let manager = masterManager;
   const requestedPort = options?.port !== undefined ? options.port : 3333;
+
+  function getManagerForProject(slug?: string): SessionManager {
+    if (!slug || slug === 'ALL' || slug === manager.projectSlug) {
+      return manager;
+    }
+    const meta = masterManager.db.getProjectMeta(slug) || manager.db.getProjectMeta(slug);
+    if (meta && meta.root_path && fs.existsSync(meta.root_path)) {
+      return new SessionManager(meta.root_path, slug);
+    }
+    return manager;
+  }
 
   let activeScanProgress: {
     isScanning: boolean;
@@ -106,18 +118,13 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
 
           if (pathname === '/api/project' && req.method === 'GET') {
             const project = (parsedUrl.query.project as string) || manager.projectSlug;
-            const digest = project === manager.projectSlug ? manager.getColdStartDigest() : {
-              project_slug: project,
-              executive_prompt: `Project: ${project}`,
-              total_modules: manager.db.getModules(project).length,
-              total_files: 0,
-              last_checkpoint: null,
-              key_rules: []
-            };
-            const meta = manager.db.getProjectMeta(project);
-            const checkpoints = manager.db.getCheckpoints(project, 10);
-            const decisions = manager.db.getDecisions(project, 10);
-            const modules = manager.db.getModules(project);
+            const targetMgr = getManagerForProject(project);
+
+            const digest = targetMgr.getColdStartDigest();
+            const meta = targetMgr.db.getProjectMeta(project) || masterManager.db.getProjectMeta(project);
+            const checkpoints = targetMgr.db.getCheckpoints(project, 10);
+            const decisions = targetMgr.db.getDecisions(project, 10);
+            const modules = targetMgr.db.getModules(project);
 
             res.writeHead(200);
             res.end(JSON.stringify({ digest, meta, checkpoints, decisions, modules }));
@@ -224,6 +231,16 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
                   errors: initRes.errors || []
                 };
 
+                // Permanently register the scanned project into master database registry!
+                masterManager.db.saveProjectMeta({
+                  project_slug: manager.projectSlug,
+                  name: path.basename(resolved),
+                  root_path: resolved,
+                  system_overview: `Proyek dipindai dari ${resolved}`,
+                  rules_and_conventions: 'Standar kode proyek.',
+                  last_active_task: 'Project scanned via Dashboard GUI.'
+                });
+
                 activeScanProgress.isScanning = false;
                 activeScanProgress.phase = 'complete';
                 activeScanProgress.stepNumber = 4;
@@ -324,21 +341,86 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
 
           if (pathname === '/api/projects' && req.method === 'GET') {
             try {
-              const metaProjects = manager.db.getRawDb().prepare('SELECT DISTINCT project_slug FROM project_meta').all() as any[];
-              const modProjects = manager.db.getRawDb().prepare('SELECT DISTINCT project_slug FROM module_memory').all() as any[];
-              const nodeProjects = manager.db.getRawDb().prepare('SELECT DISTINCT project_slug FROM code_nodes').all() as any[];
-              const allSlugs = [...new Set([
-                manager.projectSlug,
-                ...metaProjects.map(p => p.project_slug),
-                ...modProjects.map(p => p.project_slug),
-                ...nodeProjects.map(p => p.project_slug)
-              ])].filter(Boolean);
+              const masterMeta = masterManager.db.getRawDb().prepare('SELECT project_slug, name, root_path FROM project_meta').all() as any[];
+              const activeMeta = (manager !== masterManager)
+                ? (manager.db.getRawDb().prepare('SELECT project_slug, name, root_path FROM project_meta').all() as any[])
+                : [];
+              const modProjects = masterManager.db.getRawDb().prepare('SELECT DISTINCT project_slug FROM module_memory').all() as any[];
+              const nodeProjects = masterManager.db.getRawDb().prepare('SELECT DISTINCT project_slug FROM code_nodes').all() as any[];
+
+              const map = new Map<string, { slug: string; name: string; rootPath: string }>();
+
+              map.set(masterManager.projectSlug, {
+                slug: masterManager.projectSlug,
+                name: masterManager.projectSlug,
+                rootPath: masterManager.workspacePath
+              });
+
+              for (const m of [...masterMeta, ...activeMeta]) {
+                if (m && m.project_slug) {
+                  map.set(m.project_slug, {
+                    slug: m.project_slug,
+                    name: m.name || m.project_slug,
+                    rootPath: m.root_path || ''
+                  });
+                }
+              }
+
+              for (const p of [...modProjects, ...nodeProjects]) {
+                if (p && p.project_slug && !map.has(p.project_slug)) {
+                  map.set(p.project_slug, {
+                    slug: p.project_slug,
+                    name: p.project_slug,
+                    rootPath: ''
+                  });
+                }
+              }
+
+              const allProjects = Array.from(map.values());
+              const allSlugs = allProjects.map(p => p.slug);
+
               res.writeHead(200);
-              res.end(JSON.stringify({ activeProject: manager.projectSlug, projects: allSlugs }));
+              res.end(JSON.stringify({
+                activeProject: manager.projectSlug,
+                projects: allSlugs,
+                projectDetails: allProjects
+              }));
             } catch (err: any) {
               res.writeHead(200);
               res.end(JSON.stringify({ activeProject: manager.projectSlug, projects: [manager.projectSlug] }));
             }
+            return;
+          }
+
+          if (pathname === '/api/register_project' && req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => {
+              try {
+                const data = JSON.parse(body || '{}');
+                const targetPath = data.path;
+                if (targetPath && fs.existsSync(targetPath)) {
+                  const resolved = path.resolve(targetPath);
+                  const slug = data.slug || path.basename(resolved).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+                  masterManager.db.saveProjectMeta({
+                    project_slug: slug,
+                    name: path.basename(resolved),
+                    root_path: resolved,
+                    system_overview: `Proyek teregistrasi dari ${resolved}`,
+                    rules_and_conventions: 'Standar kode proyek.',
+                    last_active_task: 'Project registered.'
+                  });
+                  res.writeHead(200);
+                  res.end(JSON.stringify({ success: true, projectSlug: slug }));
+                  return;
+                }
+                res.writeHead(400);
+                res.end(JSON.stringify({ error: 'Valid directory path required' }));
+              } catch (err: any) {
+                res.writeHead(500);
+                res.end(JSON.stringify({ error: err.message }));
+              }
+            });
             return;
           }
 
@@ -379,8 +461,9 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
           if (pathname === '/api/graph' && req.method === 'GET') {
             const rawProject = parsedUrl.query.project as string;
             const project = (!rawProject || rawProject === 'ALL') ? manager.projectSlug : rawProject;
-            let nodes = manager.db.findNodes(project);
-            let edges = manager.db.getAllEdges(project);
+            const targetMgr = getManagerForProject(project);
+            let nodes = targetMgr.db.findNodes(project);
+            let edges = targetMgr.db.getAllEdges(project);
 
             // Format edges with source & target aliases for contract & Playwright tests
             const formattedEdges = edges.map(e => ({
@@ -447,7 +530,8 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
           if (pathname === '/api/security_audit' && req.method === 'GET') {
             try {
               const project = (parsedUrl.query.project as string) || manager.projectSlug;
-              const auditResult = manager.auditSecurity(project);
+              const targetMgr = getManagerForProject(project);
+              const auditResult = targetMgr.auditSecurity(project);
               res.writeHead(200);
               res.end(JSON.stringify(auditResult));
             } catch (err: any) {
@@ -460,7 +544,8 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
           if (pathname === '/api/performance_audit' && req.method === 'GET') {
             try {
               const project = (parsedUrl.query.project as string) || manager.projectSlug;
-              const auditResult = manager.auditPerformance(project);
+              const targetMgr = getManagerForProject(project);
+              const auditResult = targetMgr.auditPerformance(project);
               res.writeHead(200);
               res.end(JSON.stringify(auditResult));
             } catch (err: any) {
@@ -473,7 +558,8 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
           if (pathname === '/api/dependency_audit' && req.method === 'GET') {
             try {
               const project = (parsedUrl.query.project as string) || manager.projectSlug;
-              const auditResult = await manager.auditDependencies(project);
+              const targetMgr = getManagerForProject(project);
+              const auditResult = await targetMgr.auditDependencies(project);
               res.writeHead(200);
               res.end(JSON.stringify(auditResult));
             } catch (err: any) {
@@ -524,14 +610,9 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
                 const data = JSON.parse(body || '{}');
                 const targetSlug = data.project;
                 if (targetSlug && targetSlug !== 'ALL') {
-                  const meta = manager.db.getProjectMeta(targetSlug);
-                  if (meta && meta.root_path && fs.existsSync(meta.root_path)) {
-                    manager = new SessionManager(meta.root_path, targetSlug);
-                  } else {
-                    manager.projectSlug = targetSlug;
-                  }
+                  manager = getManagerForProject(targetSlug);
                 } else if (targetSlug === 'ALL') {
-                  manager = new SessionManager(workspace);
+                  manager = masterManager;
                 }
                 res.writeHead(200);
                 res.end(JSON.stringify({ success: true, activeProject: manager.projectSlug }));
@@ -555,16 +636,14 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
                 manager.dropProject(project);
 
                 // 2. If active manager was in another folder (e.g. external scanned folder), also wipe from workspace DB
-                if (manager.workspacePath !== workspace) {
-                  try {
-                    const wsManager = new SessionManager(workspace);
-                    wsManager.dropProject(project);
-                  } catch {}
-                }
+                // 2. Also wipe from masterManager DB registry
+                try {
+                  masterManager.dropProject(project);
+                } catch {}
 
-                // 3. Reset manager back to workspace root if it was on the dropped project or external
+                // 3. Reset manager back to masterManager if it was on the dropped project
                 if (manager.projectSlug === project || manager.workspacePath !== workspace) {
-                  manager = new SessionManager(workspace);
+                  manager = masterManager;
                 }
 
                 // 4. Retrieve remaining distinct project slugs

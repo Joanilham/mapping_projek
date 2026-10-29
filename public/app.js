@@ -2048,7 +2048,26 @@ async function handleFilterChange() {
   const selectedProject = document.getElementById("projectFilter").value;
   const currentProject = selectedProject === "ALL" ? (rawData[0]?.project || "mapping-projek") : selectedProject;
 
-  // 1. Strict Inspector Isolation: If currently selected module is not in selected project, select the first one!
+  // Persist selected project in localStorage
+  if (selectedProject && selectedProject !== "ALL") {
+    localStorage.setItem("active_project_slug", selectedProject);
+  }
+
+  // 1. Synchronize active project with backend bridge if connected
+  if (BRIDGE_URL) {
+    try {
+      await fetch(`${BRIDGE_URL}/api/set_active_project`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: selectedProject })
+      });
+    } catch {}
+  }
+
+  // 2. Fetch live data & modules for the newly selected project
+  await loadLiveDataFromBackend(currentProject, false);
+
+  // 3. Strict Inspector Isolation: If currently selected module is not in selected project, select the first one!
   const filteredMods = getFilteredModules();
   const currentActive = rawData.find(d => d.id === selectedId);
   if (!currentActive || (selectedProject !== "ALL" && currentActive.project !== selectedProject)) {
@@ -2064,26 +2083,17 @@ async function handleFilterChange() {
     }
   }
 
-  // 2. Synchronize active project with backend bridge if connected
-  if (BRIDGE_URL) {
-    fetch(`${BRIDGE_URL}/api/set_active_project`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project: selectedProject })
-    }).catch(() => {});
-  }
-
-  // 3. Refresh sidebar and memory graph
+  // 4. Refresh sidebar and memory graph
   renderSidebarList();
   syncMemoryGraphData(true);
 
-  // 4. Load files dynamically for the selected project
+  // 5. Load files dynamically for the selected project
   await loadProjectFiles(currentProject);
   if (fileNetwork) {
     renderFileDependencyMap(null, true);
   }
 
-  // 5. Update audits for the selected project
+  // 6. Update audits for the selected project
   if (currentWorkspaceMode === "security") {
     loadSecurityAudit(false);
   } else if (currentWorkspaceMode === "performance") {
@@ -2095,12 +2105,32 @@ async function handleFilterChange() {
 
 async function updateProjectFilterOptions() {
   let projects = [...new Set(rawData.map(d => d.project))].filter(Boolean);
+  let activeBackendProject = null;
+
   try {
     const res = await fetch(`${BRIDGE_URL}/api/projects`);
     if (res.ok) {
       const data = await res.json();
+      activeBackendProject = data.activeProject;
       if (Array.isArray(data.projects)) {
         projects = [...new Set([...projects, ...data.projects])].filter(Boolean);
+      }
+    }
+  } catch {}
+
+  // Also check recent scanned projects from localStorage and auto-register with server
+  try {
+    const recentPaths = JSON.parse(localStorage.getItem("recent_scanned_projects") || "[]");
+    for (const rPath of recentPaths) {
+      const parts = rPath.replace(/[/\\]+$/, '').split(/[/\\]/);
+      const derivedSlug = (parts[parts.length - 1] || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      if (derivedSlug && !projects.includes(derivedSlug)) {
+        projects.push(derivedSlug);
+        fetch(`${BRIDGE_URL}/api/register_project`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: rPath, slug: derivedSlug })
+        }).catch(() => {});
       }
     }
   } catch {}
@@ -2108,6 +2138,8 @@ async function updateProjectFilterOptions() {
   const selectEl = document.getElementById("projectFilter");
   if (!selectEl) return;
   const currentVal = selectEl.value;
+  const savedSlug = localStorage.getItem("active_project_slug");
+
   selectEl.innerHTML = '<option value="ALL">all_projects</option>';
   projects.forEach(p => {
     const opt = document.createElement("option");
@@ -2115,9 +2147,16 @@ async function updateProjectFilterOptions() {
     opt.textContent = p;
     selectEl.appendChild(opt);
   });
-  if (projects.includes(currentVal)) {
-    selectEl.value = currentVal;
-  }
+
+  const preferredVal = (currentVal && currentVal !== "ALL" && projects.includes(currentVal))
+    ? currentVal
+    : (savedSlug && projects.includes(savedSlug))
+      ? savedSlug
+      : (activeBackendProject && projects.includes(activeBackendProject))
+        ? activeBackendProject
+        : "ALL";
+
+  selectEl.value = preferredVal;
 }
 
 function toggleTheme() {
@@ -2686,16 +2725,15 @@ function copyCliCommand() {
   });
 }
 
-// ============================================================================
 // 12. DYNAMIC LIVE DATA SYNC & BOOTSTRAP
 // ============================================================================
-async function loadLiveDataFromBackend() {
-  let activeSlug = "mapping-projek";
+async function loadLiveDataFromBackend(requestedSlug, autoRefreshUi = true) {
+  let activeSlug = requestedSlug || localStorage.getItem("active_project_slug") || "mapping-projek";
   try {
-    const res = await fetch(`${BRIDGE_URL}/api/project`);
+    const res = await fetch(`${BRIDGE_URL}/api/project?project=${encodeURIComponent(activeSlug)}`);
     if (res.ok) {
       const data = await res.json();
-      activeSlug = data.meta?.project_slug || data.digest?.project_slug || "mapping-projek";
+      activeSlug = data.meta?.project_slug || data.digest?.project_slug || activeSlug;
 
       if (Array.isArray(data.modules) && data.modules.length > 0) {
         const liveModules = data.modules.map((m, idx) => ({
@@ -2721,7 +2759,7 @@ async function loadLiveDataFromBackend() {
           content: `### Sistem Overview: ${data.meta?.name || activeSlug}
 ${data.meta?.system_overview || 'Arsitektur dan sistem kode proyek.'}
 
-*Proyek baru terpetakan secara otomatis (0 AI Token).*`,
+*Proyek terpetakan secara otomatis (0 AI Token).*`,
           dependencies: [],
           updated_at: new Date().toISOString()
         }, ...otherModules];
@@ -2731,30 +2769,48 @@ ${data.meta?.system_overview || 'Arsitektur dan sistem kode proyek.'}
     console.warn("Could not fetch /api/project live data:", err);
   }
 
-  await updateProjectFilterOptions();
-  await loadProjectFiles(activeSlug);
+  if (autoRefreshUi) {
+    await updateProjectFilterOptions();
+    await loadProjectFiles(activeSlug);
 
-  renderSidebarList();
-  syncMemoryGraphData(true);
+    renderSidebarList();
+    syncMemoryGraphData(true);
 
-  const defMod = rawData.find(d => d.project === activeSlug && d.module === "system_overview") ||
-                 rawData.find(d => d.project === activeSlug) ||
-                 rawData[0];
-  if (defMod) selectModule(defMod.id, false);
+    const defMod = rawData.find(d => d.project === activeSlug && d.module === "system_overview") ||
+                   rawData.find(d => d.project === activeSlug) ||
+                   rawData[0];
+    if (defMod) selectModule(defMod.id, false);
+  }
 }
 
 window.onload = async function () {
+  const savedSlug = localStorage.getItem("active_project_slug");
   await updateProjectFilterOptions();
   initMemoryGraph();
-  renderSidebarList();
-  syncMemoryGraphData(true);
 
-  const defMod = rawData.find(d => d.module === "system_overview") || rawData[0];
-  if (defMod) selectModule(defMod.id, false);
+  const selectEl = document.getElementById("projectFilter");
+  if (savedSlug && selectEl) {
+    const exists = Array.from(selectEl.options).some(o => o.value === savedSlug);
+    if (exists) selectEl.value = savedSlug;
+  }
+
+  const activeProject = (selectEl && selectEl.value !== "ALL") ? selectEl.value : (savedSlug || "mapping-projek");
 
   checkBridge();
   setInterval(checkBridge, 5000);
-  await loadLiveDataFromBackend();
+
+  // Synchronize backend with restored active project
+  if (activeProject && BRIDGE_URL) {
+    try {
+      await fetch(`${BRIDGE_URL}/api/set_active_project`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: activeProject })
+      });
+    } catch {}
+  }
+
+  await loadLiveDataFromBackend(activeProject, true);
 };
 
 // ============================================================================
