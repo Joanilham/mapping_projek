@@ -154,3 +154,46 @@ export interface DataFlowTrace {
   propagation?: DataFlowTraceResult;
 }
 
+export type DependencyEcosystem = 'npm' | 'composer' | 'pypi' | 'gomod';
+
+export type DependencyStatus = 'UP_TO_DATE' | 'PATCH_UPDATE' | 'MINOR_UPDATE' | 'MAJOR_UPDATE' | 'SECURITY_VULNERABLE';
+
+export interface DependencyItem {
+  name: string;
+  ecosystem: DependencyEcosystem;
+  currentVersion: string;
+  wantedVersion?: string;
+  latestVersion: string;
+  isDev: boolean;
+  status: DependencyStatus;
+  updateType: 'MAJOR' | 'MINOR' | 'PATCH' | 'NONE';
+  description?: string;
+  homepage?: string;
+  vulnerabilities?: Array<{
+    id: string;
+    severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    title: string;
+    advisoryUrl?: string;
+  }>;
+  suggestedCommand: string;
+}
+
+export interface DependencyAuditResult {
+  projectSlug: string;
+  manifestPath: string;
+  ecosystems: DependencyEcosystem[];
+  score: number; // 0 - 100
+  health: 'OPTIMAL' | 'WARNING' | 'CRITICAL';
+  totalDependencies: number;
+  upToDateCount: number;
+  outdatedCount: number;
+  vulnerableCount: number;
+  summary: {
+    major: number;
+    minor: number;
+    patch: number;
+    vulnerable: number;
+  };
+  dependencies: DependencyItem[];
+}
+

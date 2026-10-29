@@ -81,6 +81,9 @@
           <button class="mode-tab" id="tabModePerformance" onclick="switchWorkspaceMode('performance')" title="Mode 5: Performance & N+1 Audit">
             <span class="mode-num">05</span> PERFORMANCE
           </button>
+          <button class="mode-tab" id="tabModeDependencies" onclick="switchWorkspaceMode('dependencies')" title="Mode 6: Dependency & Outdated Packages Audit">
+            <span class="mode-num">06</span> DEPENDENCIES
+          </button>
         </div>
       </div>
 
@@ -284,6 +287,64 @@
               <div id="perfMissingIdxList" class="audit-issues-list"></div>
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- MODE 6: AUDIT DEPENDENSI & PAKET UPDATE -->
+      <section class="stage-view" id="viewDependencies">
+        <div class="audit-panel-container">
+          <div class="audit-header-card">
+            <div class="audit-badge-box">
+              <div class="audit-grade-pill" id="depHealthBadge">HEALTH -</div>
+              <div>
+                <h3 style="margin:0 0 4px 0; font-size:15px; color:var(--text-main);">Universal Dependency Auditor</h3>
+                <div style="font-size:12px; color:var(--text-muted);" id="depScoreSummary">Memeriksa manifes package.json, composer.json, requirements.txt & go.mod...</div>
+              </div>
+            </div>
+            <div class="audit-actions">
+              <button class="btn-mono active" id="btnRefreshDeps" onclick="loadDependencyAudit(true)">⚡ Jalankan Ulang Audit Dependensi</button>
+            </div>
+          </div>
+
+          <div class="audit-stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));">
+            <div class="stat-card" style="border-left: 3px solid var(--c-arch);">
+              <span class="stat-num" id="statDepTotal">0</span>
+              <span class="stat-label">TOTAL PAKET</span>
+            </div>
+            <div class="stat-card" style="border-left: 3px solid #10b981;">
+              <span class="stat-num" id="statDepUpToDate" style="color:#10b981;">0</span>
+              <span class="stat-label">UP TO DATE</span>
+            </div>
+            <div class="stat-card" style="border-left: 3px solid var(--c-api);">
+              <span class="stat-num" id="statDepPatch">0</span>
+              <span class="stat-label">PATCH UPDATE</span>
+            </div>
+            <div class="stat-card" style="border-left: 3px solid var(--c-rules);">
+              <span class="stat-num" id="statDepMinor">0</span>
+              <span class="stat-label">MINOR UPDATE</span>
+            </div>
+            <div class="stat-card" style="border-left: 3px solid var(--c-danger);">
+              <span class="stat-num" id="statDepMajor" style="color:var(--c-danger);">0</span>
+              <span class="stat-label">MAJOR UPDATE</span>
+            </div>
+            <div class="stat-card" style="border-left: 3px solid #ef4444;" id="statCardDepVuln">
+              <span class="stat-num" id="statDepVuln" style="color:#ef4444;">0</span>
+              <span class="stat-label">VULNERABILITIES</span>
+            </div>
+          </div>
+
+          <div class="audit-filter-bar">
+            <span>Filter Dependensi:</span>
+            <button class="btn-mono active" id="depFilterAll" onclick="filterDependencies('ALL')">Semua</button>
+            <button class="btn-mono" id="depFilterUpdates" onclick="filterDependencies('UPDATES')">Perlu Update</button>
+            <button class="btn-mono" id="depFilterMajor" onclick="filterDependencies('MAJOR')">Major</button>
+            <button class="btn-mono" id="depFilterMinor" onclick="filterDependencies('MINOR')">Minor</button>
+            <button class="btn-mono" id="depFilterPatch" onclick="filterDependencies('PATCH')">Patch</button>
+            <button class="btn-mono" id="depFilterVuln" onclick="filterDependencies('VULNERABLE')">Rentan</button>
+            <button class="btn-mono" id="depFilterDev" onclick="filterDependencies('DEV')">Dev Only</button>
+          </div>
+
+          <div class="audit-issues-list" id="dependencyItemsList" style="margin-top:14px;"></div>
         </div>
       </section>
     </div>

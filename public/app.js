@@ -1898,6 +1898,8 @@ function switchWorkspaceMode(mode) {
   if (tabSec) tabSec.classList.toggle("active", mode === "security");
   const tabPerf = document.getElementById("tabModePerformance");
   if (tabPerf) tabPerf.classList.toggle("active", mode === "performance");
+  const tabDeps = document.getElementById("tabModeDependencies");
+  if (tabDeps) tabDeps.classList.toggle("active", mode === "dependencies");
 
   document.getElementById("viewGraph").classList.toggle("active", mode === "graph");
   document.getElementById("viewFiles").classList.toggle("active", mode === "files");
@@ -1906,6 +1908,8 @@ function switchWorkspaceMode(mode) {
   if (viewSec) viewSec.classList.toggle("active", mode === "security");
   const viewPerf = document.getElementById("viewPerformance");
   if (viewPerf) viewPerf.classList.toggle("active", mode === "performance");
+  const viewDeps = document.getElementById("viewDependencies");
+  if (viewDeps) viewDeps.classList.toggle("active", mode === "dependencies");
 
   const statusEl = document.getElementById("activeModeStatus");
   if (mode === "graph") {
@@ -1956,6 +1960,10 @@ function switchWorkspaceMode(mode) {
     stopAutoPlaySimulation();
     if (statusEl) statusEl.textContent = "05 // Audit Performa N+1";
     loadPerformanceAudit(false);
+  } else if (mode === "dependencies") {
+    stopAutoPlaySimulation();
+    if (statusEl) statusEl.textContent = "06 // Audit Dependensi & Update";
+    loadDependencyAudit(false);
   }
 }
 
@@ -2080,6 +2088,8 @@ async function handleFilterChange() {
     loadSecurityAudit(false);
   } else if (currentWorkspaceMode === "performance") {
     loadPerformanceAudit(false);
+  } else if (currentWorkspaceMode === "dependencies") {
+    loadDependencyAudit(false);
   }
 }
 
@@ -2577,6 +2587,9 @@ async function executeClearProject() {
       if (typeof performanceAuditCache !== "undefined" && performanceAuditCache) {
         delete performanceAuditCache[project];
       }
+      if (typeof dependencyAuditCache !== "undefined" && dependencyAuditCache) {
+        delete dependencyAuditCache[project];
+      }
 
       // 3. Clear inspector if active module or file belonged to dropped project
       const currentActive = rawData.find(d => d.id === selectedId);
@@ -2714,6 +2727,9 @@ let performanceAuditCache = {};
 let securityAuditData = null;
 let currentSecurityFilter = "ALL";
 let performanceAuditData = null;
+let dependencyAuditCache = {};
+let dependencyAuditData = null;
+let currentDependencyFilter = "ALL";
 
 function escapeHtml(str) {
   if (str === null || str === undefined) return '';
@@ -2918,6 +2934,252 @@ async function loadPerformanceAudit(forceRefresh = false) {
     `).join('');
   }
   if (forceRefresh) showToast(`Audit performa [${currentProject}] selesai!`, true);
+}
+
+// ============================================================================
+// 13. AUDIT DEPENDENSI & UPDATE CHECKER ENGINE
+// ============================================================================
+async function loadDependencyAudit(forceRefresh = false) {
+  const currentProject = getSelectedProject();
+  const badgeEl = document.getElementById("depHealthBadge");
+  const summaryEl = document.getElementById("depScoreSummary");
+  const listEl = document.getElementById("dependencyItemsList");
+  if (!badgeEl || !listEl) return;
+
+  if (forceRefresh) showToast(`Sedang menganalisis dependensi [${currentProject}]...`);
+
+  if (!dependencyAuditCache[currentProject] || forceRefresh) {
+    if (summaryEl) summaryEl.textContent = `Memeriksa manifes dependensi & registry publik [${currentProject}]...`;
+    listEl.innerHTML = `<div style="padding:16px; color:var(--text-muted); font-family:'JetBrains Mono', monospace;">Memindai paket dependensi & versi rilis terbaru...</div>`;
+    try {
+      const res = await fetch(`${BRIDGE_URL}/api/dependency_audit?project=${encodeURIComponent(currentProject)}`);
+      if (!res.ok) throw new Error("Gagal mengambil data audit dependensi");
+      dependencyAuditCache[currentProject] = await res.json();
+    } catch (err) {
+      if (summaryEl) summaryEl.textContent = `Error dependensi [${currentProject}]: ${err.message}`;
+      listEl.innerHTML = `<div style="padding:16px; color:var(--c-danger);">Gagal memuat audit dependensi: ${err.message}</div>`;
+      showToast(`Error: ${err.message}`);
+      return;
+    }
+  }
+
+  dependencyAuditData = dependencyAuditCache[currentProject];
+
+  const health = dependencyAuditData.health || "OPTIMAL";
+  badgeEl.className = `audit-grade-pill ${health === "OPTIMAL" ? "grade-a" : (health === "WARNING" ? "grade-c" : "grade-f")}`;
+  badgeEl.textContent = `HEALTH: ${health}`;
+  if (summaryEl) {
+    summaryEl.textContent = `Manifes: ${dependencyAuditData.manifestPath} • Skor: ${dependencyAuditData.score}/100 • Total: ${dependencyAuditData.totalDependencies} paket (${dependencyAuditData.outdatedCount} perlu update)`;
+  }
+
+  const elTotal = document.getElementById("statDepTotal");
+  if (elTotal) elTotal.textContent = dependencyAuditData.totalDependencies || 0;
+  const elUpToDate = document.getElementById("statDepUpToDate");
+  if (elUpToDate) elUpToDate.textContent = dependencyAuditData.upToDateCount || 0;
+  const elPatch = document.getElementById("statDepPatch");
+  if (elPatch) elPatch.textContent = dependencyAuditData.summary?.patch || 0;
+  const elMinor = document.getElementById("statDepMinor");
+  if (elMinor) elMinor.textContent = dependencyAuditData.summary?.minor || 0;
+  const elMajor = document.getElementById("statDepMajor");
+  if (elMajor) elMajor.textContent = dependencyAuditData.summary?.major || 0;
+  const elVuln = document.getElementById("statDepVuln");
+  if (elVuln) elVuln.textContent = dependencyAuditData.summary?.vulnerable || 0;
+
+  renderDependencyItems();
+  if (forceRefresh) showToast(`Audit dependensi [${currentProject}] selesai!`, true);
+}
+
+function filterDependencies(filterType) {
+  currentDependencyFilter = filterType;
+  const filters = ["ALL", "UPDATES", "MAJOR", "MINOR", "PATCH", "VULNERABLE", "DEV"];
+  const ids = {
+    ALL: "depFilterAll",
+    UPDATES: "depFilterUpdates",
+    MAJOR: "depFilterMajor",
+    MINOR: "depFilterMinor",
+    PATCH: "depFilterPatch",
+    VULNERABLE: "depFilterVuln",
+    DEV: "depFilterDev"
+  };
+
+  filters.forEach(f => {
+    const btn = document.getElementById(ids[f]);
+    if (btn) btn.classList.toggle("active", f === filterType);
+  });
+
+  renderDependencyItems();
+}
+
+function renderDependencyItems() {
+  const listEl = document.getElementById("dependencyItemsList");
+  if (!listEl) return;
+
+  if (!dependencyAuditData || !Array.isArray(dependencyAuditData.dependencies)) {
+    listEl.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-muted); font-family:\'JetBrains Mono\', monospace;">Belum ada data audit dependensi.</div>';
+    return;
+  }
+
+  let items = dependencyAuditData.dependencies;
+
+  if (currentDependencyFilter === "UPDATES") {
+    items = items.filter(d => d.status !== "UP_TO_DATE");
+  } else if (currentDependencyFilter === "MAJOR") {
+    items = items.filter(d => d.status === "MAJOR_UPDATE");
+  } else if (currentDependencyFilter === "MINOR") {
+    items = items.filter(d => d.status === "MINOR_UPDATE");
+  } else if (currentDependencyFilter === "PATCH") {
+    items = items.filter(d => d.status === "PATCH_UPDATE");
+  } else if (currentDependencyFilter === "VULNERABLE") {
+    items = items.filter(d => d.status === "SECURITY_VULNERABLE");
+  } else if (currentDependencyFilter === "DEV") {
+    items = items.filter(d => d.isDev);
+  }
+
+  if (items.length === 0) {
+    listEl.innerHTML = '<div style="padding:24px; text-align:center; color:var(--c-api); font-family:\'JetBrains Mono\', monospace; background:var(--bg-subtle); border-radius:6px; border:1px solid var(--border);">✔ TIDAK ADA DEPENDENSI PADA KATEGORI INI</div>';
+    return;
+  }
+
+  const badgeClassMap = {
+    UP_TO_DATE: "dep-status-uptodate",
+    PATCH_UPDATE: "dep-status-patch",
+    MINOR_UPDATE: "dep-status-minor",
+    MAJOR_UPDATE: "dep-status-major",
+    SECURITY_VULNERABLE: "dep-status-vuln"
+  };
+
+  const badgeLabelMap = {
+    UP_TO_DATE: "UP TO DATE",
+    PATCH_UPDATE: "PATCH UPDATE",
+    MINOR_UPDATE: "MINOR UPDATE",
+    MAJOR_UPDATE: "MAJOR UPDATE",
+    SECURITY_VULNERABLE: "VULNERABLE"
+  };
+
+  listEl.innerHTML = items.map(dep => {
+    const badgeClass = badgeClassMap[dep.status] || "dep-status-uptodate";
+    const badgeLabel = badgeLabelMap[dep.status] || dep.status;
+    const isUp = dep.status === "UP_TO_DATE";
+
+    const vulnHtml = (dep.vulnerabilities && dep.vulnerabilities.length > 0) ? `
+      <div class="dep-vuln-banner">
+        <span>⚠️ <strong>${escapeHtml(dep.vulnerabilities[0].id)}</strong>: ${escapeHtml(dep.vulnerabilities[0].title)}</span>
+        ${dep.vulnerabilities[0].advisoryUrl ? `<a href="${dep.vulnerabilities[0].advisoryUrl}" target="_blank" style="color:#ef4444; text-decoration:underline; font-size:11px;">Rincian CVE ➔</a>` : ''}
+      </div>
+    ` : '';
+
+    return `
+      <div class="dep-item-card" onclick="inspectDependency('${escapeHtml(dep.name)}')">
+        <div class="dep-header-row">
+          <div class="dep-name-group">
+            <span class="dep-name">${escapeHtml(dep.name)}</span>
+            <span class="dep-eco-tag">${dep.ecosystem}</span>
+            ${dep.isDev ? '<span class="dep-dev-tag">dev</span>' : ''}
+          </div>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div class="dep-version-diff">
+              <span class="dep-ver-cur">v${escapeHtml(dep.currentVersion)}</span>
+              ${!isUp ? `<span class="dep-ver-arrow">➔</span><span class="dep-ver-latest" style="color:${dep.status === 'MAJOR_UPDATE' ? 'var(--c-danger)' : (dep.status === 'MINOR_UPDATE' ? '#fbbf24' : '#60a5fa')}">v${escapeHtml(dep.latestVersion)}</span>` : ''}
+            </div>
+            <span class="dep-status-badge ${badgeClass}">${badgeLabel}</span>
+          </div>
+        </div>
+
+        ${vulnHtml}
+
+        <div class="dep-action-row" onclick="event.stopPropagation()">
+          <div class="dep-cmd-preview" title="${escapeHtml(dep.suggestedCommand)}">
+            $ ${escapeHtml(dep.suggestedCommand)}
+          </div>
+          <button class="dep-btn-copy" onclick="copyDependencyCommand('${escapeHtml(dep.suggestedCommand)}')">
+            <span>📋 Salin Perintah</span>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function inspectDependency(depName) {
+  if (!dependencyAuditData || !Array.isArray(dependencyAuditData.dependencies)) return;
+  const dep = dependencyAuditData.dependencies.find(d => d.name === depName);
+  if (!dep) return;
+
+  const panel = document.getElementById("inspectorPanel");
+  if (!panel) return;
+
+  const isUp = dep.status === "UP_TO_DATE";
+  let registryUrl = "";
+  if (dep.ecosystem === "npm") registryUrl = `https://www.npmjs.com/package/${encodeURIComponent(dep.name)}`;
+  else if (dep.ecosystem === "composer") registryUrl = `https://packagist.org/packages/${encodeURIComponent(dep.name)}`;
+  else if (dep.ecosystem === "pypi") registryUrl = `https://pypi.org/project/${encodeURIComponent(dep.name)}/`;
+  else if (dep.ecosystem === "gomod") registryUrl = `https://pkg.go.dev/${dep.name}`;
+
+  panel.innerHTML = `
+    <div class="inspector-header">
+      <div class="inspector-breadcrumbs">
+        <span class="crumb-proj">${escapeHtml(dependencyAuditData.projectSlug)}</span> /
+        <span class="crumb-cat">${dep.ecosystem}</span> /
+        <span class="crumb-mod">${dep.isDev ? "dev-dependency" : "dependency"}</span>
+      </div>
+      <h2 class="inspector-title" style="word-break:break-all;">${escapeHtml(dep.name)}</h2>
+    </div>
+
+    <div class="inspector-tabs">
+      <div class="tab-btn active" style="flex:1; text-align:center;">STATUS PEMBARUAN</div>
+    </div>
+
+    <div class="inspector-body markdown-body">
+      <h3>Informasi Paket & Versi</h3>
+      <ul>
+        <li><strong>Ekosistem:</strong> <code>${dep.ecosystem}</code> (${dep.isDev ? "Development" : "Production Runtime"})</li>
+        <li><strong>Versi Terpasang:</strong> <code>v${escapeHtml(dep.currentVersion)}</code> (Rentang: <code>${escapeHtml(dep.wantedVersion || dep.currentVersion)}</code>)</li>
+        <li><strong>Versi Terbaru:</strong> <code>v${escapeHtml(dep.latestVersion)}</code></li>
+        <li><strong>Status:</strong> <span class="dep-status-badge ${dep.status === 'UP_TO_DATE' ? 'dep-status-uptodate' : (dep.status === 'MAJOR_UPDATE' ? 'dep-status-major' : (dep.status === 'SECURITY_VULNERABLE' ? 'dep-status-vuln' : 'dep-status-minor'))}">${dep.status}</span></li>
+      </ul>
+
+      ${(dep.vulnerabilities && dep.vulnerabilities.length > 0) ? `
+        <h3 style="color:#ef4444;">⚠️ Kerentanan Keamanan Ditemukan</h3>
+        <ul>
+          ${dep.vulnerabilities.map(v => `
+            <li>
+              <strong>${escapeHtml(v.id)}</strong> (${v.severity}): ${escapeHtml(v.title)}
+              ${v.advisoryUrl ? `<br><a href="${v.advisoryUrl}" target="_blank" style="color:var(--c-arch);">Lihat Advisory NVD / CVE ➔</a>` : ''}
+            </li>
+          `).join('')}
+        </ul>
+      ` : ''}
+
+      <h3>Perintah Pembaruan Cepat</h3>
+      <div style="background:var(--bg-code); padding:10px 14px; border-radius:4px; border:1px solid var(--border); font-family:'JetBrains Mono', monospace; font-size:12px; display:flex; justify-content:space-between; align-items:center;">
+        <code>${escapeHtml(dep.suggestedCommand)}</code>
+        <button class="btn-mono" onclick="copyDependencyCommand('${escapeHtml(dep.suggestedCommand)}')">Salin</button>
+      </div>
+
+      ${registryUrl ? `
+        <div style="margin-top:20px;">
+          <a href="${registryUrl}" target="_blank" style="display:inline-flex; align-items:center; gap:6px; color:var(--c-arch); text-decoration:none; font-family:'JetBrains Mono', monospace; font-size:12px; font-weight:600;">
+            🌐 Buka Halaman Resmi ${dep.ecosystem.toUpperCase()} ➔
+          </a>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function copyDependencyCommand(cmd) {
+  if (!cmd) return;
+  navigator.clipboard.writeText(cmd).then(() => {
+    showToast(`copied: ${cmd}`);
+  }).catch(() => {
+    const temp = document.createElement("textarea");
+    temp.value = cmd;
+    document.body.appendChild(temp);
+    temp.select();
+    document.execCommand("copy");
+    document.body.removeChild(temp);
+    showToast(`copied: ${cmd}`);
+  });
 }
 
 // Global Keyboard Shortcuts for Panel Management

@@ -7,9 +7,16 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { MemoryDatabase } from '../db/database.js';
 
+export type PerformanceDimension =
+  | 'DIRECT_QUERY_IN_LOOP'
+  | 'INTERPROCEDURAL_CALL_IN_LOOP'
+  | 'LAZY_LOADING_WITHOUT_EAGER'
+  | 'UNBOUNDED_COLLECTION_FETCH'
+  | 'SYNC_IO_IN_LOOP';
+
 export interface NPlusOneFinding {
   id: string;
-  dimension: 'DIRECT_QUERY_IN_LOOP' | 'INTERPROCEDURAL_CALL_IN_LOOP' | 'LAZY_LOADING_WITHOUT_EAGER';
+  dimension: PerformanceDimension;
   filePath: string;
   loopLineNumber: number;
   queryLineNumber: number;
@@ -102,6 +109,16 @@ export class PerformanceAuditor {
     // 2. Cross-File Schema Differ for Missing Indexes
     const schemaFindings = this.detectMissingIndexes(filePaths);
     missingIndexFindings.push(...schemaFindings);
+
+    // Prioritize primary N+1 loop findings before general unbounded fetch / sync I/O
+    const dimensionPriority: Record<PerformanceDimension, number> = {
+      DIRECT_QUERY_IN_LOOP: 1,
+      INTERPROCEDURAL_CALL_IN_LOOP: 2,
+      LAZY_LOADING_WITHOUT_EAGER: 3,
+      SYNC_IO_IN_LOOP: 4,
+      UNBOUNDED_COLLECTION_FETCH: 5
+    };
+    nPlusOneFindings.sort((a, b) => (dimensionPriority[a.dimension] ?? 99) - (dimensionPriority[b.dimension] ?? 99));
 
     // Calculate performance score
     let score = 100;
@@ -223,10 +240,44 @@ export class PerformanceAuditor {
           });
         }
 
+        // Check Dimension 4: Synchronous I/O or HTTP Call inside loop
+        if (/\b(?:curl_exec|file_get_contents|requests\.(?:get|post|put|delete)|urllib\.request|fs\.readFileSync|fs\.writeFileSync)\s*\(/.test(codeTokens)) {
+          findings.push({
+            id: `perf_sync_io_${relPath}_${lineNum}`,
+            dimension: 'SYNC_IO_IN_LOOP',
+            filePath: relPath,
+            loopLineNumber: loopStartLine,
+            queryLineNumber: lineNum,
+            loopSnippet,
+            querySnippet: trimmed,
+            description: `Operasi I/O blocking atau network call sinkron terdeteksi di dalam perulangan loop baris ${loopStartLine}.`,
+            recommendation: 'Gunakan pemanggilan asinkron batch (Promise.all, async/await concurrency, atau worker queue).'
+          });
+        }
+
         // Check if loop exited
         if (loopBraceDepth <= 0 && isLoopEntry === false) {
           currentLoopDepth = 0;
           loopBraceDepth = 0;
+        }
+      } else {
+        // Check Dimension 5: Unbounded Collection Fetch without limit/pagination
+        const lower = relPath.toLowerCase();
+        if (!lower.includes('test') && !lower.includes('seed') && !lower.includes('migration') && !lower.includes('factory')) {
+          const unboundedMatch = codeTokens.match(/\b([A-Z][a-zA-Z0-9_]*)::all\s*\(\s*\)|\b(prisma\.[a-zA-Z0-9_]+\.findMany)\s*\(\s*(?:\{\s*\})?\s*\)|\b([A-Z][a-zA-Z0-9_]*\.objects\.all)\s*\(\s*\)/);
+          if (unboundedMatch) {
+            findings.push({
+              id: `perf_unbounded_${relPath}_${lineNum}`,
+              dimension: 'UNBOUNDED_COLLECTION_FETCH',
+              filePath: relPath,
+              loopLineNumber: lineNum,
+              queryLineNumber: lineNum,
+              loopSnippet: trimmed,
+              querySnippet: trimmed,
+              description: `Pengambilan seluruh koleksi data (${unboundedMatch[0]}) tanpa paginasi (limit/offset) berisiko kehabisan memory pada tabel besar.`,
+              recommendation: 'Gunakan pagination (contoh: paginate(), chunk(), take(), atau limit() dengan cursor).'
+            });
+          }
         }
       }
     }

@@ -11,7 +11,8 @@ import { DataFlowTracer } from './data_flow.js';
 import { DependencyInjectionResolver } from './di_resolver.js';
 import { SecurityAuditor, SecurityAuditResult, SecurityIssue } from './security_auditor.js';
 import { PerformanceAuditor, PerformanceAuditResult } from './performance_auditor.js';
-import { ModuleCategory, ModuleMemory, SessionCheckpoint, ColdStartDigest, CodeNode, CodeEdge, DataFlowTrace } from '../types/index.js';
+import { DependencyAuditor } from './dependency_auditor.js';
+import { ModuleCategory, ModuleMemory, SessionCheckpoint, ColdStartDigest, CodeNode, CodeEdge, DataFlowTrace, DependencyAuditResult } from '../types/index.js';
 
 export interface ScanProgressInfo {
   phase: 'discovering' | 'checksumming' | 'parsing' | 'resolving' | 'complete' | 'error';
@@ -552,10 +553,19 @@ export class SessionManager {
   /**
    * Run full security audit on project files or stored modules
    */
+  /**
+   * Run full security audit on project files or stored modules
+   */
   public auditSecurity(projectSlug?: string): SecurityAuditResult {
     const slug = projectSlug || this.projectSlug;
-    if (slug === this.projectSlug) {
-      const allFiles = this.hasher.scanFiles();
+    const meta = this.db.getProjectMeta(slug);
+    const targetDir = (meta && meta.root_path && fs.existsSync(meta.root_path))
+      ? meta.root_path
+      : (slug === this.projectSlug ? this.workspacePath : '');
+
+    if (targetDir && fs.existsSync(targetDir)) {
+      const hasher = new DeltaHasher(targetDir, slug, this.db);
+      const allFiles = hasher.scanFiles();
       const targetFiles = allFiles.filter(f => {
         const lf = f.toLowerCase();
         return !lf.startsWith('tests/') &&
@@ -566,11 +576,11 @@ export class SessionManager {
                !lf.endsWith('.spec.ts');
       });
       const filesToAudit = targetFiles.length > 0 ? targetFiles : allFiles;
-      const auditor = new SecurityAuditor(this.workspacePath, this.projectSlug);
+      const auditor = new SecurityAuditor(targetDir, slug);
       return auditor.auditFiles(filesToAudit);
     }
 
-    // For non-active project (e.g. synced from MCP vault or other stored projects in DB)
+    // Fallback for virtual projects stored only in DB (without physical folder on disk)
     const auditor = new SecurityAuditor('', slug);
     const rawDb = this.db.getRawDb();
     const issues: SecurityIssue[] = [];
@@ -614,8 +624,14 @@ export class SessionManager {
    */
   public auditPerformance(projectSlug?: string): PerformanceAuditResult {
     const slug = projectSlug || this.projectSlug;
-    if (slug === this.projectSlug) {
-      const allFiles = this.hasher.scanFiles();
+    const meta = this.db.getProjectMeta(slug);
+    const targetDir = (meta && meta.root_path && fs.existsSync(meta.root_path))
+      ? meta.root_path
+      : (slug === this.projectSlug ? this.workspacePath : '');
+
+    if (targetDir && fs.existsSync(targetDir)) {
+      const hasher = new DeltaHasher(targetDir, slug, this.db);
+      const allFiles = hasher.scanFiles();
       const targetFiles = allFiles.filter(f => {
         const lf = f.toLowerCase();
         return !lf.startsWith('tests/') &&
@@ -626,11 +642,11 @@ export class SessionManager {
                !lf.endsWith('.spec.ts');
       });
       const filesToAudit = targetFiles.length > 0 ? targetFiles : allFiles;
-      const auditor = new PerformanceAuditor(this.workspacePath, this.projectSlug, this.db);
+      const auditor = new PerformanceAuditor(targetDir, slug, this.db);
       return auditor.auditFiles(filesToAudit);
     }
 
-    // For non-active project (e.g. synced from MCP vault or other stored projects in DB)
+    // Fallback for virtual projects stored only in DB
     const auditor = new PerformanceAuditor('', slug, this.db);
     const rawDb = this.db.getRawDb();
     const nPlusOneFindings: any[] = [];
@@ -669,5 +685,19 @@ export class SessionManager {
       nPlusOneFindings,
       missingIndexFindings
     };
+  }
+
+  /**
+   * Run full dependency audit (outdated packages, semver diff, and known security advisories)
+   */
+  public async auditDependencies(projectSlug?: string): Promise<DependencyAuditResult> {
+    const slug = projectSlug || this.projectSlug;
+    const meta = this.db.getProjectMeta(slug);
+    const targetDir = (meta && meta.root_path && fs.existsSync(meta.root_path))
+      ? meta.root_path
+      : (slug === this.projectSlug ? this.workspacePath : '');
+
+    const auditor = new DependencyAuditor(targetDir || this.workspacePath, slug, this.db);
+    return auditor.audit();
   }
 }

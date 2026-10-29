@@ -443,6 +443,19 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
             return;
           }
 
+          if (pathname === '/api/dependency_audit' && req.method === 'GET') {
+            try {
+              const project = (parsedUrl.query.project as string) || manager.projectSlug;
+              const auditResult = await manager.auditDependencies(project);
+              res.writeHead(200);
+              res.end(JSON.stringify(auditResult));
+            } catch (err: any) {
+              res.writeHead(500);
+              res.end(JSON.stringify({ error: err.message }));
+            }
+            return;
+          }
+
           if (pathname === '/api/sync' && req.method === 'POST') {
             const delta = manager.syncBaseline();
             res.writeHead(200);

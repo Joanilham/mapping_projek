@@ -9,9 +9,21 @@ import { TaintTracker, TaintTrace } from './taint_tracker.js';
 
 export type SecuritySeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 
+export type SecurityCategory =
+  | 'SQLI'
+  | 'XSS'
+  | 'HARDCODED_SECRET'
+  | 'MASS_ASSIGNMENT'
+  | 'CMD_INJECTION'
+  | 'PATH_TRAVERSAL'
+  | 'INSECURE_CRYPTO'
+  | 'INSECURE_EVAL'
+  | 'CONFIG_LEAK'
+  | 'CSRF_RISK';
+
 export interface SecurityIssue {
   id: string;
-  category: 'SQLI' | 'XSS' | 'HARDCODED_SECRET' | 'MASS_ASSIGNMENT' | 'CMD_INJECTION' | 'PATH_TRAVERSAL';
+  category: SecurityCategory;
   severity: SecuritySeverity;
   title: string;
   filePath: string;
@@ -198,9 +210,168 @@ export class SecurityAuditor {
           });
         }
       }
+
+      // E. Raw SQL String Concatenation / Interpolation
+      const rawSqlIssue = this.checkRawSqlConcatenation(relPath, line, lineNum);
+      if (rawSqlIssue && !issues.some(x => x.filePath === relPath && x.lineNumber === lineNum && x.category === 'SQLI')) {
+        issues.push(rawSqlIssue);
+      }
+
+      // F. Insecure Cryptography / Weak Hashing
+      const cryptoIssue = this.checkInsecureCrypto(relPath, line, lineNum);
+      if (cryptoIssue) issues.push(cryptoIssue);
+
+      // G. Insecure Deserialization & Dynamic Eval
+      const evalIssue = this.checkInsecureEval(relPath, line, lineNum);
+      if (evalIssue) issues.push(evalIssue);
+
+      // H. Insecure Config & Debug Leak
+      const configIssue = this.checkDangerousConfig(relPath, line, lineNum);
+      if (configIssue) issues.push(configIssue);
+
+      // I. CSRF Protection Risk
+      const csrfIssue = this.checkCsrfRisk(relPath, line, lineNum);
+      if (csrfIssue) issues.push(csrfIssue);
     }
 
     return issues;
+  }
+
+  /**
+   * Detect Raw SQL String Concatenation or Template Interpolation
+   */
+  private checkRawSqlConcatenation(relPath: string, line: string, lineNum: number): SecurityIssue | null {
+    const lower = relPath.toLowerCase();
+    if (lower.includes('test') || lower.includes('fixture') || lower.includes('migration')) return null;
+
+    const hasSqlVerb = /\b(?:SELECT\s+.*?FROM|INSERT\s+INTO|UPDATE\s+.*?SET|DELETE\s+FROM)\b/i.test(line);
+    const hasInterpolation =
+      /(?:\.\s*\$[a-zA-Z0-9_]+|\+\s*[a-zA-Z0-9_]+|`[^`]*\$\{[^}]+\}[^`]*`|\bDB::raw\s*\([^)]*\$|\bDB::select\s*\([^)]*\$)/i.test(line);
+
+    if (hasSqlVerb && hasInterpolation && !line.includes('?') && !line.includes(':')) {
+      return {
+        id: `sec_sqli_raw_${relPath}_${lineNum}`,
+        category: 'SQLI',
+        severity: 'CRITICAL',
+        title: 'Raw SQL Query Concatenation Terdeteksi',
+        filePath: relPath,
+        lineNumber: lineNum,
+        codeSnippet: line.trim(),
+        description: 'Penggabungan string dinamis pada query SQL tanpa prepared statement / parameterized binding berisiko SQL Injection.',
+        recommendation: 'Gunakan placeholder parameterized query (misal ? atau :id) dan kirim variabel sebagai parameter terpisah.'
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Detect Insecure Cryptography & Weak Hashing (md5/sha1 for sensitive data)
+   */
+  private checkInsecureCrypto(relPath: string, line: string, lineNum: number): SecurityIssue | null {
+    const lower = relPath.toLowerCase();
+    if (lower.includes('test') || lower.includes('fixture') || lower.includes('hasher.ts')) return null;
+
+    if (/\b(?:md5|sha1)\s*\(\s*[^)]+\)/i.test(line) ||
+        /(?:crypto\.createHash\s*\(\s*['"](?:md5|sha1)['"]|hashlib\.(?:md5|sha1)\s*\()/i.test(line)) {
+      return {
+        id: `sec_crypto_${relPath}_${lineNum}`,
+        category: 'INSECURE_CRYPTO',
+        severity: 'HIGH',
+        title: 'Penggunaan Algoritma Hash Lemah (MD5 / SHA1)',
+        filePath: relPath,
+        lineNumber: lineNum,
+        codeSnippet: line.trim(),
+        description: 'Fungsi hash MD5 dan SHA1 rentan terhadap collision attack dan rainbow table cracking.',
+        recommendation: 'Gunakan bcrypt / Argon2 (untuk password) atau SHA-256 / SHA-512 (untuk integritas data dan signature).'
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Detect Insecure Deserialization & Dynamic Code Execution
+   */
+  private checkInsecureEval(relPath: string, line: string, lineNum: number): SecurityIssue | null {
+    const lower = relPath.toLowerCase();
+    if (lower.includes('test') || lower.includes('fixture')) return null;
+
+    if (/\beval\s*\(\s*(?:\$_(?:GET|POST|REQUEST)|\$request|[a-zA-Z0-9_]+)/i.test(line) ||
+        /\bunserialize\s*\(\s*(?:\$_(?:GET|POST|REQUEST)|\$request|[a-zA-Z0-9_]+)/i.test(line) ||
+        /\bpickle\.loads?\s*\(/i.test(line)) {
+      return {
+        id: `sec_eval_${relPath}_${lineNum}`,
+        category: 'INSECURE_EVAL',
+        severity: 'CRITICAL',
+        title: 'Insecure Dynamic Execution / Deserialization',
+        filePath: relPath,
+        lineNumber: lineNum,
+        codeSnippet: line.trim(),
+        description: 'Pemanggilan eval() atau unserialize() pada input dinamis memungkinkan Remote Code Execution (RCE).',
+        recommendation: 'Hindari pemanggilan eval() atau unserialize(). Gunakan format data terstruktur aman seperti JSON (json_decode / json.loads).'
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Detect Dangerous Configurations & Debug Leakage
+   */
+  private checkDangerousConfig(relPath: string, line: string, lineNum: number): SecurityIssue | null {
+    const lower = relPath.toLowerCase();
+    if (lower.includes('.example') || lower.includes('.sample') || lower.includes('.template')) return null;
+
+    if (lower.endsWith('.env') || lower.includes('config') || lower.includes('settings')) {
+      if (/^\s*APP_DEBUG\s*=\s*true\b/i.test(line) || /^\s*DEBUG\s*=\s*True\b/.test(line)) {
+        return {
+          id: `sec_cfg_debug_${relPath}_${lineNum}`,
+          category: 'CONFIG_LEAK',
+          severity: 'HIGH',
+          title: 'Debug Mode Aktif (APP_DEBUG = true)',
+          filePath: relPath,
+          lineNumber: lineNum,
+          codeSnippet: line.trim(),
+          description: 'Debug mode aktif mengekspos stack trace sensitif, query SQL, dan kunci rahasia ketika terjadi exception.',
+          recommendation: 'Setel APP_DEBUG=false pada lingkungan production dan staging.'
+        };
+      }
+      if (/display_errors\s*=\s*(?:On|1)\b/i.test(line)) {
+        return {
+          id: `sec_cfg_errors_${relPath}_${lineNum}`,
+          category: 'CONFIG_LEAK',
+          severity: 'MEDIUM',
+          title: 'display_errors Diaktifkan',
+          filePath: relPath,
+          lineNumber: lineNum,
+          codeSnippet: line.trim(),
+          description: 'display_errors aktif mencetak rincian error internal ke layar browser pengguna.',
+          recommendation: 'Nonaktifkan display_errors (display_errors = Off) dan arahkan output error ke file log tertutup.'
+        };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Detect CSRF Protection Bypass
+   */
+  private checkCsrfRisk(relPath: string, line: string, lineNum: number): SecurityIssue | null {
+    const lower = relPath.toLowerCase();
+    if (lower.includes('test') || lower.includes('fixture')) return null;
+
+    if (/\$except\s*=\s*\[\s*['"]\*['"]\s*\]/i.test(line) || /@csrf_exempt/i.test(line)) {
+      return {
+        id: `sec_csrf_bypass_${relPath}_${lineNum}`,
+        category: 'CSRF_RISK',
+        severity: 'HIGH',
+        title: 'Bypass Proteksi CSRF Terdeteksi',
+        filePath: relPath,
+        lineNumber: lineNum,
+        codeSnippet: line.trim(),
+        description: 'Mengecualikan seluruh endpoint dari verifikasi CSRF membuka celah Cross-Site Request Forgery.',
+        recommendation: 'Hanya kecualikan route stateless webhook resmi dengan verifikasi signature terpisah (HMAC).'
+      };
+    }
+    return null;
   }
 
   /**
