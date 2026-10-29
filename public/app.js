@@ -2384,17 +2384,37 @@ async function executeGuiProjectScan() {
   const countLabel = document.getElementById("scanCountLabel");
   const errorsContainer = document.getElementById("scanErrorsContainer");
   const errorsList = document.getElementById("scanErrorsList");
+  const stepBadge = document.getElementById("scanStepBadge");
+  const step1 = document.getElementById("scanStep1");
+  const step2 = document.getElementById("scanStep2");
+  const step3 = document.getElementById("scanStep3");
+  const step4 = document.getElementById("scanStep4");
+
+  const updateStepper = (activeStep) => {
+    const steps = [step1, step2, step3, step4];
+    steps.forEach((s, idx) => {
+      if (!s) return;
+      s.classList.remove("active", "completed");
+      if (idx + 1 < activeStep) {
+        s.classList.add("completed");
+      } else if (idx + 1 === activeStep) {
+        s.classList.add("active");
+      }
+    });
+  };
 
   if (progressCard) progressCard.style.display = "block";
   if (progressBar) progressBar.style.width = "5%";
   if (percentBadge) percentBadge.textContent = "5%";
   if (progressTitle) progressTitle.textContent = "⏳ Sedang Memindai...";
-  if (currentFileLabel) currentFileLabel.textContent = "Memulai inisialisasi pemindai...";
+  if (stepBadge) stepBadge.textContent = "Tahap 1/4";
+  updateStepper(1);
+  if (currentFileLabel) currentFileLabel.textContent = "Memulai inventarisasi berkas proyek...";
   if (countLabel) countLabel.textContent = "0 / 0 berkas";
   if (errorsContainer) errorsContainer.style.display = "none";
   if (errorsList) errorsList.innerHTML = "";
 
-  // Mulai polling progres setiap 160ms
+  // Mulai polling progres setiap 100ms
   if (scanProgressPoller) clearInterval(scanProgressPoller);
   scanProgressPoller = setInterval(async () => {
     try {
@@ -2405,16 +2425,29 @@ async function executeGuiProjectScan() {
       if (progressBar) progressBar.style.width = `${p.percent || 5}%`;
       if (percentBadge) percentBadge.textContent = `${p.percent || 5}%`;
 
-      if (p.phase === 'discovering') {
+      if (p.phase === 'discovering' || p.phase === 'checksumming') {
+        updateStepper(1);
+        if (stepBadge) stepBadge.textContent = "Tahap 1/4";
         if (progressTitle) progressTitle.textContent = "🔍 Mengindeks Berkas...";
         if (currentFileLabel) currentFileLabel.textContent = p.currentFile || "Mencari berkas kode...";
+        if (countLabel) countLabel.textContent = `${p.currentIndex || 0} / ${p.totalFiles || 0} berkas`;
       } else if (p.phase === 'parsing') {
+        updateStepper(2);
+        if (stepBadge) stepBadge.textContent = "Tahap 2/4";
         if (progressTitle) progressTitle.textContent = "⚙ Parsing & Ekstraksi AST...";
         if (currentFileLabel) currentFileLabel.textContent = p.currentFile || "Menganalisis berkas...";
         if (countLabel) countLabel.textContent = `${p.currentIndex || 0} / ${p.totalFiles || 0} berkas`;
       } else if (p.phase === 'resolving') {
+        updateStepper(3);
+        if (stepBadge) stepBadge.textContent = "Tahap 3/4";
         if (progressTitle) progressTitle.textContent = "🔗 Menghubungkan Dependensi...";
-        if (currentFileLabel) currentFileLabel.textContent = p.currentFile || "Resolusi relasi antar-modul...";
+        if (currentFileLabel) currentFileLabel.textContent = p.currentFile || "Resolusi interface & dependency injection...";
+        if (countLabel) countLabel.textContent = `${p.totalFiles || 0} / ${p.totalFiles || 0} berkas`;
+      } else if (p.phase === 'finalizing') {
+        updateStepper(4);
+        if (stepBadge) stepBadge.textContent = "Tahap 4/4";
+        if (progressTitle) progressTitle.textContent = "💾 Sinkronisasi Memori...";
+        if (currentFileLabel) currentFileLabel.textContent = p.currentFile || "Menyimpan baseline memori...";
         if (countLabel) countLabel.textContent = `${p.totalFiles || 0} / ${p.totalFiles || 0} berkas`;
       }
 
@@ -2442,7 +2475,7 @@ async function executeGuiProjectScan() {
         btn.textContent = "🚀 coba_lagi";
       }
     } catch {}
-  }, 160);
+  }, 100);
 
   try {
     const res = await fetch(`${BRIDGE_URL}/api/scan_project`, {
@@ -2460,8 +2493,13 @@ async function executeGuiProjectScan() {
     if (data.success) {
       if (progressBar) progressBar.style.width = "100%";
       if (percentBadge) percentBadge.textContent = "100%";
+      if (stepBadge) stepBadge.textContent = "Selesai (4/4)";
+      [step1, step2, step3, step4].forEach(s => {
+        if (s) { s.classList.remove("active"); s.classList.add("completed"); }
+      });
       if (progressTitle) progressTitle.textContent = "✔ Pemindaian Berhasil!";
       if (currentFileLabel) currentFileLabel.textContent = `Selesai: ${data.totalFiles} berkas berhasil dipetakan!`;
+      if (countLabel) countLabel.textContent = `${data.totalFiles} / ${data.totalFiles} berkas`;
 
       // STRICT ISOLATION: When scanning Project A, Project B does not leak in!
       rawData = [];

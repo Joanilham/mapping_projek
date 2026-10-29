@@ -414,26 +414,54 @@
       </div>
 
       <!-- PROGRESS BAR & STATUS PEMINDAIAN REAL-TIME -->
-      <div id="scanProgressCard" style="display:none; margin-bottom:14px; background:var(--bg-code); border:1px solid var(--border); border-radius:6px; padding:12px 14px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <span style="font-weight:600; font-size:11.5px; font-family:'JetBrains Mono',monospace; color:var(--text-main);" id="scanProgressTitle">
-            ⏳ Sedang Memindai...
-          </span>
-          <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; font-weight:700; color:var(--c-arch);" id="scanPercentBadge">
+      <!-- PROGRESS BAR & STATUS PEMINDAIAN REAL-TIME -->
+      <div id="scanProgressCard" class="scan-progress-box" style="display:none;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-weight:600; font-size:12px; font-family:'JetBrains Mono',monospace; color:var(--text-main);" id="scanProgressTitle">
+              ⏳ Sedang Memindai...
+            </span>
+            <span id="scanStepBadge" class="scan-step-badge">Tahap 1/4</span>
+          </div>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700; color:var(--c-arch);" id="scanPercentBadge">
             0%
           </span>
         </div>
 
+        <!-- 4-STEP VISUAL TRACKER -->
+        <div class="scan-stepper-tracker" id="scanStepperTracker">
+          <div class="scan-step-item active" id="scanStep1">
+            <span class="scan-step-num">1</span>
+            <span class="scan-step-txt">Indeks Berkas</span>
+          </div>
+          <div class="scan-step-item" id="scanStep2">
+            <span class="scan-step-num">2</span>
+            <span class="scan-step-txt">Parse AST</span>
+          </div>
+          <div class="scan-step-item" id="scanStep3">
+            <span class="scan-step-num">3</span>
+            <span class="scan-step-txt">Resolusi DI</span>
+          </div>
+          <div class="scan-step-item" id="scanStep4">
+            <span class="scan-step-num">4</span>
+            <span class="scan-step-txt">Finalisasi</span>
+          </div>
+        </div>
+
         <!-- PROGRESS BAR TRACK -->
-        <div style="width:100%; height:7px; background:var(--bg-subtle); border-radius:4px; overflow:hidden; border:1px solid var(--border); margin-bottom:8px;">
+        <div style="width:100%; height:7px; background:var(--bg-subtle); border-radius:4px; overflow:hidden; border:1px solid var(--border); margin-bottom:10px;">
           <div id="scanProgressBar" style="width:0%; height:100%; background:linear-gradient(90deg, var(--c-arch), var(--c-api)); transition:width 0.2s ease;"></div>
         </div>
 
-        <div style="font-size:11px; font-family:'JetBrains Mono',monospace; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center;">
-          <span id="scanCurrentFileLabel" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:320px;">
-            Menyiapkan pemindaian...
-          </span>
-          <span id="scanCountLabel" style="font-size:10.5px; color:var(--text-muted); white-space:nowrap;">
+        <!-- CURRENT FILE & COUNTER -->
+        <div style="font-size:11px; font-family:'JetBrains Mono',monospace; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center; gap:10px;">
+          <div style="display:flex; align-items:center; gap:6px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; flex:1;">
+            <span style="color:var(--c-arch);">📄</span>
+            <span id="scanCurrentFileLabel" style="overflow:hidden; text-overflow:ellipsis;">
+              Menyiapkan pemindaian...
+            </span>
+          </div>
+          <span id="scanCountLabel" style="font-size:10.5px; color:var(--text-main); font-weight:600; white-space:nowrap; background:var(--surface); padding:2px 7px; border-radius:4px; border:1px solid var(--border);">
             0 / 0 berkas
           </span>
         </div>

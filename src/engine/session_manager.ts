@@ -15,11 +15,14 @@ import { DependencyAuditor } from './dependency_auditor.js';
 import { ModuleCategory, ModuleMemory, SessionCheckpoint, ColdStartDigest, CodeNode, CodeEdge, DataFlowTrace, DependencyAuditResult } from '../types/index.js';
 
 export interface ScanProgressInfo {
-  phase: 'discovering' | 'checksumming' | 'parsing' | 'resolving' | 'complete' | 'error';
+  phase: 'discovering' | 'checksumming' | 'parsing' | 'resolving' | 'finalizing' | 'complete' | 'error';
   currentFile?: string;
   currentIndex: number;
   totalFiles: number;
   errorCount: number;
+  stepNumber?: number;
+  stepTotal?: number;
+  stepName?: string;
   lastError?: { file: string; message: string };
   errors?: Array<{ file: string; message: string }>;
 }
@@ -219,6 +222,245 @@ export class SessionManager {
       currentIndex: totalCount,
       totalFiles: totalCount,
       errorCount: errors.length,
+      errors
+    });
+
+    return {
+      scannedFiles: filesToParse.length,
+      totalNodes,
+      totalEdges: allEdges.length,
+      errors
+    };
+  }
+
+  /**
+   * Asynchronous Project Initialization yielding to event loop for real-time UI progress updates
+   */
+  public async initProjectAsync(options?: {
+    name?: string;
+    overview?: string;
+    rules?: string;
+    onProgress?: (p: ScanProgressInfo) => void;
+  }): Promise<{
+    projectSlug: string;
+    totalFiles: number;
+    dbPath: string;
+    errors?: Array<{ file: string; message: string }>;
+  }> {
+    const existing = this.db.getProjectMeta(this.projectSlug);
+
+    let detectedName = options?.name ?? existing?.name;
+    let detectedOverview = options?.overview ?? existing?.system_overview;
+
+    if (!detectedName || !detectedOverview) {
+      // 1. Check Node package.json
+      const pkgPath = path.join(this.workspacePath, 'package.json');
+      if (fs.existsSync(pkgPath)) {
+        try {
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+          if (!detectedName && pkg.name) detectedName = pkg.name;
+          if (!detectedOverview && pkg.description) detectedOverview = pkg.description;
+        } catch {}
+      }
+
+      // 2. Check Gradle settings.gradle.kts / build.gradle
+      const gradleSettings = path.join(this.workspacePath, 'settings.gradle.kts');
+      if (fs.existsSync(gradleSettings)) {
+        try {
+          const content = fs.readFileSync(gradleSettings, 'utf-8');
+          const rootMatch = content.match(/rootProject\.name\s*=\s*["']([^"']+)["']/);
+          if (!detectedName && rootMatch) detectedName = rootMatch[1];
+        } catch {}
+      }
+
+      // 3. Check Go go.mod
+      const goMod = path.join(this.workspacePath, 'go.mod');
+      if (fs.existsSync(goMod)) {
+        try {
+          const content = fs.readFileSync(goMod, 'utf-8');
+          const modMatch = content.match(/module\s+([^\s\n]+)/);
+          if (!detectedName && modMatch) detectedName = path.basename(modMatch[1]);
+        } catch {}
+      }
+    }
+
+    this.db.saveProjectMeta({
+      project_slug: this.projectSlug,
+      name: detectedName ?? path.basename(this.workspacePath),
+      root_path: this.workspacePath,
+      system_overview: detectedOverview ?? 'Arsitektur dan sistem modul proyek.',
+      rules_and_conventions: options?.rules ?? existing?.rules_and_conventions ?? 'Standar arsitektur & konvensi kode proyek.',
+      last_active_task: existing?.last_active_task ?? 'Project initialized.'
+    });
+
+    // Step 1: Discovering files
+    options?.onProgress?.({
+      phase: 'discovering',
+      currentFile: 'Mencari berkas dan memindai hierarki folder...',
+      currentIndex: 0,
+      totalFiles: 0,
+      errorCount: 0,
+      stepNumber: 1,
+      stepTotal: 4,
+      stepName: '1/4 Inventarisasi Berkas'
+    });
+    await new Promise(resolve => setImmediate(resolve));
+
+    // Take initial baseline checksum snapshot
+    const delta = this.hasher.syncChecksums();
+    options?.onProgress?.({
+      phase: 'checksumming',
+      currentFile: `Mengindeks ${delta.totalCount} berkas proyek...`,
+      currentIndex: 0,
+      totalFiles: delta.totalCount,
+      errorCount: 0,
+      stepNumber: 1,
+      stepTotal: 4,
+      stepName: '1/4 Inventarisasi Berkas'
+    });
+    await new Promise(resolve => setImmediate(resolve));
+
+    // Map initial codebase AST asynchronously
+    const mapRes = await this.mapCodebaseAsync({ forceAll: true, onProgress: options?.onProgress });
+
+    return {
+      projectSlug: this.projectSlug,
+      totalFiles: delta.totalCount,
+      dbPath: this.db.dbPath,
+      errors: mapRes.errors
+    };
+  }
+
+  /**
+   * Scan and parse codebase into AST Nodes and Edges asynchronously with event-loop yielding
+   */
+  public async mapCodebaseAsync(options?: {
+    forceAll?: boolean;
+    onProgress?: (p: ScanProgressInfo) => void;
+  }): Promise<{
+    scannedFiles: number;
+    totalNodes: number;
+    totalEdges: number;
+    errors: Array<{ file: string; message: string }>;
+  }> {
+    const { delta } = this.hasher.computeDelta();
+    const allFiles = this.hasher.scanFiles();
+
+    const parseableExts = new Set(['.php', '.phtml', '.py', '.go', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
+    const isParseable = (f: string) => f.endsWith('.blade.php') || parseableExts.has(path.extname(f));
+
+    let filesToParse: string[];
+    if (options?.forceAll) {
+      filesToParse = allFiles.filter(isParseable);
+      this.db.clearProjectGraph(this.projectSlug);
+    } else {
+      filesToParse = [...delta.addedFiles, ...delta.modifiedFiles].filter(isParseable);
+      for (const del of delta.deletedFiles) {
+        this.db.clearFileGraph(this.projectSlug, del);
+      }
+    }
+
+    const errors: Array<{ file: string; message: string }> = [];
+    const totalCount = filesToParse.length;
+
+    options?.onProgress?.({
+      phase: 'parsing',
+      currentFile: `Memulai ekstraksi AST untuk ${totalCount} berkas sumber...`,
+      currentIndex: 0,
+      totalFiles: totalCount,
+      errorCount: 0,
+      stepNumber: 2,
+      stepTotal: 4,
+      stepName: '2/4 Parsing AST & Simbol'
+    });
+    await new Promise(resolve => setImmediate(resolve));
+
+    let currentIdx = 0;
+    for (const relPath of filesToParse) {
+      currentIdx++;
+      options?.onProgress?.({
+        phase: 'parsing',
+        currentFile: relPath,
+        currentIndex: currentIdx,
+        totalFiles: totalCount,
+        errorCount: errors.length,
+        stepNumber: 2,
+        stepTotal: 4,
+        stepName: '2/4 Parsing AST & Simbol'
+      });
+
+      // Yield event loop every single file so HTTP polling receives fresh progress!
+      await new Promise(resolve => setImmediate(resolve));
+
+      try {
+        this.db.clearFileGraph(this.projectSlug, relPath);
+        const { nodes, edges } = this.polyglotAdapter.parse(relPath);
+        this.db.saveCodeNodes(nodes);
+        this.db.saveCodeEdges(edges);
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+        errors.push({ file: relPath, message: msg });
+        options?.onProgress?.({
+          phase: 'parsing',
+          currentFile: relPath,
+          currentIndex: currentIdx,
+          totalFiles: totalCount,
+          errorCount: errors.length,
+          stepNumber: 2,
+          stepTotal: 4,
+          stepName: '2/4 Parsing AST & Simbol',
+          lastError: { file: relPath, message: msg }
+        });
+        console.warn(`[project-mapper] Warning: failed to parse ${relPath}:`, msg);
+      }
+    }
+
+    // Step 3: Cross-file Dependency Injection & Interface resolution pass
+    options?.onProgress?.({
+      phase: 'resolving',
+      currentFile: 'Menyambungkan relasi Dependency Injection & Interface...',
+      currentIndex: totalCount,
+      totalFiles: totalCount,
+      errorCount: errors.length,
+      stepNumber: 3,
+      stepTotal: 4,
+      stepName: '3/4 Resolusi Relasi Arsitektur'
+    });
+    await new Promise(resolve => setImmediate(resolve));
+
+    const allCurrentNodes = this.db.findNodes(this.projectSlug);
+    const allCurrentEdges = this.db.getAllEdges(this.projectSlug);
+    const diResolver = new DependencyInjectionResolver(this.projectSlug);
+    const { edges: resolvedEdges } = diResolver.resolve(allCurrentNodes, allCurrentEdges);
+    this.db.saveCodeEdges(resolvedEdges);
+
+    // Step 4: Finalizing & Syncing Checksums
+    options?.onProgress?.({
+      phase: 'finalizing',
+      currentFile: 'Menyimpan checksum baseline dan finalisasi grafik...',
+      currentIndex: totalCount,
+      totalFiles: totalCount,
+      errorCount: errors.length,
+      stepNumber: 4,
+      stepTotal: 4,
+      stepName: '4/4 Finalisasi Memori'
+    });
+    await new Promise(resolve => setImmediate(resolve));
+
+    this.hasher.syncChecksums();
+
+    const totalNodes = allCurrentNodes.length;
+    const allEdges = this.db.getAllEdges(this.projectSlug);
+
+    options?.onProgress?.({
+      phase: 'complete',
+      currentFile: `Pemindaian selesai: ${totalCount} berkas dipetakan, ${allEdges.length} relasi terbentuk.`,
+      currentIndex: totalCount,
+      totalFiles: totalCount,
+      errorCount: errors.length,
+      stepNumber: 4,
+      stepTotal: 4,
+      stepName: 'Selesai',
       errors
     });
 

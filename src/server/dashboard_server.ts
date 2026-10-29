@@ -25,6 +25,9 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
     projectSlug: string;
     rootPath: string;
     phase: string;
+    stepNumber: number;
+    stepTotal: number;
+    stepName: string;
     currentFile: string;
     currentIndex: number;
     totalFiles: number;
@@ -39,6 +42,9 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
     projectSlug: '',
     rootPath: '',
     phase: 'idle',
+    stepNumber: 0,
+    stepTotal: 4,
+    stepName: '',
     currentFile: '',
     currentIndex: 0,
     totalFiles: 0,
@@ -127,7 +133,7 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
           if (pathname === '/api/scan_project' && req.method === 'POST') {
             let body = '';
             req.on('data', chunk => { body += chunk; });
-            req.on('end', () => {
+            req.on('end', async () => {
               try {
                 const data = JSON.parse(body || '{}');
                 const targetPath = data.path || data.workspacePath;
@@ -149,6 +155,9 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
                   projectSlug: path.basename(resolved),
                   rootPath: resolved,
                   phase: 'discovering',
+                  stepNumber: 1,
+                  stepTotal: 4,
+                  stepName: '1/4 Inventarisasi Berkas',
                   currentFile: 'Memeriksa berkas & dependensi proyek...',
                   currentIndex: 0,
                   totalFiles: 0,
@@ -170,16 +179,32 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
 
                 // Switch server active manager to the target project!
                 manager = new SessionManager(resolved);
-                const initRes = manager.initProject({
+                const initRes = await manager.initProjectAsync({
                   onProgress: (p) => {
                     activeScanProgress.phase = p.phase;
+                    activeScanProgress.stepNumber = p.stepNumber ?? 1;
+                    activeScanProgress.stepTotal = p.stepTotal ?? 4;
+                    activeScanProgress.stepName = p.stepName ?? '';
                     activeScanProgress.currentFile = p.currentFile || '';
                     activeScanProgress.currentIndex = p.currentIndex;
                     activeScanProgress.totalFiles = p.totalFiles;
                     activeScanProgress.errorCount = p.errorCount;
-                    if (p.totalFiles > 0) {
-                      activeScanProgress.percent = Math.min(98, Math.round((p.currentIndex / p.totalFiles) * 90) + 5);
+
+                    if (p.phase === 'discovering' || p.phase === 'checksumming') {
+                      activeScanProgress.percent = Math.max(activeScanProgress.percent, 8);
+                    } else if (p.phase === 'parsing') {
+                      if (p.totalFiles > 0) {
+                        // 10% to 80%
+                        activeScanProgress.percent = Math.min(80, Math.round((p.currentIndex / p.totalFiles) * 70) + 10);
+                      }
+                    } else if (p.phase === 'resolving') {
+                      activeScanProgress.percent = 88;
+                    } else if (p.phase === 'finalizing') {
+                      activeScanProgress.percent = 95;
+                    } else if (p.phase === 'complete') {
+                      activeScanProgress.percent = 100;
                     }
+
                     if (p.lastError) {
                       activeScanProgress.errors.push(p.lastError);
                     }
@@ -201,6 +226,8 @@ export function startDashboardServer(options?: DashboardServerOptions): Promise<
 
                 activeScanProgress.isScanning = false;
                 activeScanProgress.phase = 'complete';
+                activeScanProgress.stepNumber = 4;
+                activeScanProgress.stepName = 'Selesai';
                 activeScanProgress.percent = 100;
                 activeScanProgress.currentFile = 'Pemindaian selesai!';
                 activeScanProgress.result = scanResult;
